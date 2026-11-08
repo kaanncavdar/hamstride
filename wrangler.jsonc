@@ -18,6 +18,10 @@
   },
   // SQLite-backed Durable Objects are available on the Workers free plan.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "Lobby", "Board"] }],
-  "vars": { "TICKET_BITS": "14" },
+  // The game is served on this subdomain. Cloudflare creates the DNS record on deploy.
+  "routes": [{ "pattern": "duel.kaancavdar.com", "custom_domain": true }],
+  "workers_dev": true,
+  // .dev.vars overrides these locally.
+  "vars": { "TICKET_BITS": "14", "ALLOWED_ORIGINS": "https://duel.kaancavdar.com" },
   "observability": { "enabled": true }
 }
