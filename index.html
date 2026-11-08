@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Wheel Duel</title>
+    <meta name="description" content="A 1v1 hamster wheel race for real humans. Keep the rhythm, read the road, freeze when the cat looks. Powered by Squeektoshi's live wheel on Squeekchain." />
+    <meta name="robots" content="index, follow, noai, noimageai" />
+    <meta name="theme-color" content="#1b1530" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+    <!-- Squeekchain Genesis verification tag goes here when you submit the project. -->
+  </head>
+  <body>
+    <div id="landing">
+      <header class="nav">
+        <a class="brand" href="#top"><i data-sprite="wheel" data-scale="2"></i><span>WHEEL DUEL</span></a>
+        <nav>
+          <a href="#how">How to play</a>
+          <a href="#board">Leaderboard</a>
+          <a href="#live">Squeektoshi</a>
+          <a href="#fair">Fair play</a>
+        </nav>
+      </header>
+
+      <section class="hero" id="top">
+        <div class="hero-stage" id="hero-stage"><canvas id="arena"></canvas>
+        </div>
+        <div class="hero-card">
+          <p class="kicker"><span class="dot" id="hero-dot"></span><span id="hero-live">A hamster wheel race for two</span></p>
+          <h1>WHEEL<br />DUEL</h1>
+          <p class="lede">Two hamsters, two wheels, one road. Keep the rhythm, read the road and freeze when the cat looks. If you just mash the keys, your wheel overheats.</p>
+          <label class="field">
+            <span>Your hamster's name</span>
+            <input id="name" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Hamster" />
+          </label>
+          <div class="cta">
+            <button class="btn primary" id="btn-quick">QUICK MATCH</button>
+            <button class="btn" id="btn-create">CREATE ROOM</button>
+          </div>
+          <form class="join" id="join-form">
+            <input id="join-code" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Room code or link" aria-label="Room code or invite link" />
+            <button class="btn small" type="submit">JOIN</button>
+          </form>
+          <button class="link-btn" id="btn-practice">Or warm up against a bot first →</button>
+          <p class="error" id="hero-error" role="alert"></p>
+        </div>
+      </section>
+
+      <section class="strip" id="live">
+        <div class="live-card">
+          <div class="live-head">
+            <i data-sprite="hamster" data-scale="4" class="bob" id="live-ham"></i>
+            <div>
+              <p class="kicker">LIVE FROM THE REAL WHEEL</p>
+              <h2 id="live-title">Checking on Squeektoshi…</h2>
+              <p class="muted" id="live-sub">Squeektoshi is a real hamster. His wheel mines blocks on Squeekchain.</p>
+            </div>
+          </div>
+          <dl class="live-stats">
+            <div><dt>SPEED</dt><dd id="live-speed">–</dd></div>
+            <div><dt>RPM</dt><dd id="live-rpm">–</dd></div>
+            <div><dt>TODAY</dt><dd id="live-km">–</dd></div>
+            <div><dt>BLOCK</dt><dd id="live-block">–</dd></div>
+          </dl>
+          <p class="live-note">When Squeektoshi is running, every race becomes a <b>Night Race</b>: the arena goes dark and golden seeds show up more often. If he completes a block while you race, a <b class="cyan">Block Drop</b> lands on both roads at the same spot.</p>
+        </div>
+      </section>
+
+      <section class="section" id="how">
+        <h2 class="h2">HOW TO PLAY</h2>
+        <div class="cards">
+          <article class="card">
+            <i data-sprite="hamster" data-scale="4"></i>
+            <h3>Keep the rhythm</h3>
+            <p>Alternate <kbd>A</kbd><kbd>D</kbd> or <kbd>←</kbd><kbd>→</kbd> like little feet. About <b>9 presses a second</b> is the sweet spot. Press faster and the wheel overheats. Hit the same foot twice and the hamster trips.</p>
+          </article>
+          <article class="card">
+            <i data-sprite="pencil" data-scale="4"></i>
+            <h3>Jump the pencils</h3>
+            <p><kbd>SPACE</kbd> jumps. Pencils lie across both lanes. A row of chilis across both lanes is also a jump.</p>
+          </article>
+          <article class="card">
+            <i data-sprite="roll" data-scale="4"></i>
+            <h3>Switch lanes</h3>
+            <p><kbd>W</kbd><kbd>S</kbd> or <kbd>↑</kbd><kbd>↓</kbd>. Toilet rolls are too tall to jump, so go around them. Grab <span class="gold">golden seeds</span> for a burst of speed. Skip the <span class="hot">chilis</span>, they heat you up.</p>
+          </article>
+          <article class="card">
+            <i data-sprite="cat" data-scale="4"></i>
+            <h3>Freeze for the cat</h3>
+            <p>A cat peeks in, then opens its eyes. While it's looking, <b>don't run</b>. One step and your hamster jumps out of its fur. An autoclicker can't tell the difference.</p>
+          </article>
+          <article class="card">
+            <i data-sprite="block" data-scale="4"></i>
+            <h3>Catch a Block Drop</h3>
+            <p>Only during a live run: when the real hamster completes a Squeekchain block mid-race, a cyan block lands ahead of both of you. Roll through it for a boost.</p>
+          </article>
+        </div>
+        <p class="touch-note">On a phone: tap the left and right foot pads, with buttons for jump and lane.</p>
+      </section>
+
+      <section class="section alt" id="join">
+        <h2 class="h2">GET INTO A RACE</h2>
+        <ol class="steps">
+          <li><b>Quick match</b><span>Puts you in the queue and pairs you with the next player who joins.</span></li>
+          <li><b>Create a room</b><span>Gives you a link. Send it to a friend, and the race starts once you're both in.</span></li>
+          <li><b>Join a room</b><span>Paste the code or the link someone sent you.</span></li>
+          <li><b>Rematch</b><span>When the race ends you both hit rematch, and a new course is drawn.</span></li>
+        </ol>
+      </section>
+
+      <section class="section" id="board">
+        <h2 class="h2">LEADERBOARD</h2>
+        <p class="muted center">Ranked by Elo. Races where a rhythm looks scripted don't count.</p>
+        <div class="table-wrap">
+          <table class="board">
+            <thead><tr><th>#</th><th>HAMSTER</th><th>ELO</th><th>W</th><th>L</th><th>BEST</th></tr></thead>
+            <tbody id="board-rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section alt" id="fair">
+        <h2 class="h2">FAIR PLAY, NO BOTS</h2>
+        <div class="cards fair">
+          <article class="card"><h3>The server is the referee</h3><p>Your browser only sends key presses. The server replays your whole race from them using the same engine, so a modified page can't fake speed or a finish.</p></article>
+          <article class="card"><h3>A course nobody picks</h3><p>Before the race the server locks in a hidden seed and shows you its hash. Both players add their own random seed. After the finish the seed is revealed and your browser checks the course was really built from it.</p></article>
+          <article class="card"><h3>The road shows up late</h3><p>Obstacles are sent only a few seconds before they reach the leader, so nothing can read the whole course in advance.</p></article>
+          <article class="card"><h3>Rhythm signature</h3><p>People wobble and scripts don't. A press rhythm that's too perfect is flagged and kept off the leaderboard.</p></article>
+        </div>
+      </section>
+
+      <section class="section" id="more">
+        <h2 class="h2">WAITING? MORE HAMSTER GAMES</h2>
+        <p class="muted center">Other builders are making things for Squeektoshi's wheel too.</p>
+        <div class="cards more">
+          <a class="card link" href="https://hamster-tower.imd.site" target="_blank" rel="noopener noreferrer"><h3>Hamster Tower ↗</h3><p>Every round of real work adds a floor to a shared, endless tower.</p></a>
+          <a class="card link" href="https://squeekout.fun" target="_blank" rel="noopener noreferrer"><h3>Squeek Out ↗</h3><p>A game of nerve: ride the wheel and jump off before he stops.</p></a>
+          <a class="card link" href="https://squeekwars.online" target="_blank" rel="noopener noreferrer"><h3>Squeek Wars ↗</h3><p>Hamster village strategy on Sepolia, fed by the wheel's work.</p></a>
+          <a class="card link" href="https://squeekchain.com/genesis/code" target="_blank" rel="noopener noreferrer"><h3>All community builds ↗</h3><p>The Genesis code board, with every approved project.</p></a>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <div class="foot-brand"><i data-sprite="wheel" data-scale="3"></i><span>WHEEL DUEL</span></div>
+        <p>A community game for <a href="https://squeekchain.com" target="_blank" rel="noopener noreferrer">Squeekchain</a>, the blockchain powered by a hamster.</p>
+        <p class="links">
+          <a href="https://docs.squeekchain.com/" target="_blank" rel="noopener noreferrer">Docs</a>
+          <a href="https://x.com/squeekchain" target="_blank" rel="noopener noreferrer">X</a>
+          <a href="https://discord.gg/squeekchain" target="_blank" rel="noopener noreferrer">Discord</a>
+          <a href="https://sepolia.squeekchain.com" target="_blank" rel="noopener noreferrer">Sepolia app</a>
+        </p>
+        <p class="muted small">Squeekchain currently runs on the Sepolia testnet. Test tokens have no real-world value.</p>
+      </footer>
+    </div>
+
+    <div id="play" hidden>
+      <div id="stage"></div>
+      <div id="hud" aria-live="polite"></div>
+      <div id="countdown" hidden></div>
+      <div id="night-badge" hidden><i data-sprite="hamster" data-scale="2"></i> NIGHT RACE · Squeektoshi is running live</div>
+      <button class="btn small ghost" id="btn-leave">LEAVE</button>
+      <div id="touch" hidden>
+        <button class="pad foot" data-key="L" aria-label="Left foot">L</button>
+        <div class="pad-mid">
+          <button class="pad act" data-key="J" aria-label="Jump">JUMP</button>
+          <button class="pad act" data-key="LANE" aria-label="Switch lane">LANE</button>
+        </div>
+        <button class="pad foot" data-key="R" aria-label="Right foot">R</button>
+      </div>
+
+      <div class="modal" id="wait" hidden>
+        <div class="panel">
+          <i data-sprite="hamster" data-scale="5" class="bob"></i>
+          <h2 id="wait-title">Finding a rival…</h2>
+          <p class="muted" id="wait-sub">This usually takes a few seconds.</p>
+          <div id="wait-room" hidden>
+            <p>Send this link to a friend:</p>
+            <div class="copy"><input id="room-link" readonly aria-label="Invite link" /><button class="btn small" id="btn-copy">COPY</button></div>
+            <p class="muted small">Room code: <b id="room-code"></b></p>
+          </div>
+          <p class="timer" id="wait-timer">0:00</p>
+          <div id="wait-ideas" hidden>
+            <p>Still waiting? Warm up against a bot. If someone joins, we'll pull you straight into the race.</p>
+            <button class="btn" id="btn-wait-practice">PRACTICE WHILE I WAIT</button>
+            <p class="muted small">Or have a look at <a href="https://squeekchain.com/genesis/code" target="_blank" rel="noopener noreferrer">other Squeekchain games</a> in a new tab.</p>
+          </div>
+          <button class="btn ghost small" id="btn-cancel">CANCEL</button>
+        </div>
+      </div>
+
+      <div class="modal" id="result" hidden>
+        <div class="panel wide">
+          <h2 id="res-title">YOU WIN!</h2>
+          <p class="muted" id="res-sub"></p>
+          <div class="res-grid" id="res-grid"></div>
+          <div class="checks" id="res-checks"></div>
+          <div class="cta">
+            <button class="btn primary" id="btn-rematch">REMATCH</button>
+            <button class="btn" id="btn-home">HOME</button>
+          </div>
+          <p class="muted small" id="res-wait"></p>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/client/main.ts"></script>
+  </body>
+</html>

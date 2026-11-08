@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development. In production use: npx wrangler secret put TICKET_SECRET
+TICKET_SECRET=replace-with-a-long-random-string
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8787
+# BOT_CV_MIN=0.06
