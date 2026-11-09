@@ -19,3 +19,27 @@ export async function readLive(): Promise<LiveInfo | null> {
     return null;
   }
 }
+
+export interface Totals {
+  km: number;
+  since: Date | null;
+  activeDays: number;
+}
+
+/** Lifetime distance from the measurement statistics (cached by the API for 60 s). */
+export async function readTotals(): Promise<Totals | null> {
+  try {
+    const res = await fetch('https://api.squeekchain.com/v1/measurement/stats?range=7d');
+    if (!res.ok) return null;
+    const j = await res.json();
+    const l = j?.lifetime;
+    if (!l) return null;
+    return {
+      km: Number(l.observedDistanceMm ?? 0) / 1_000_000,
+      since: l.firstObservedAt ? new Date(l.firstObservedAt) : null,
+      activeDays: Number(l.activeDayCount ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}

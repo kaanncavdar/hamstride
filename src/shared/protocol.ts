@@ -11,14 +11,14 @@ export interface LiveInfo {
 }
 
 export type ClientMsg =
-  | { type: 'hello'; name: string; seed: string; pid: string; wd: boolean }
+  | { type: 'hello'; name: string; seed: string; wd: boolean }
   | { type: 'in'; a: [number, Key][] }
   | { type: 'ping'; c: number }
   | { type: 'rematch'; seed: string };
 
 export interface EndInfo {
   winner: 0 | 1 | -1;
-  reason: 'finish' | 'timeout' | 'forfeit';
+  reason: 'tired' | 'timeout' | 'forfeit' | 'abandoned';
   final: [PState, PState];
   reveal: { serverSeed: string; seeds: [string, string] };
   courseHash: string;
@@ -29,7 +29,8 @@ export interface EndInfo {
 }
 
 export type ServerMsg =
-  | { type: 'welcome'; you: 0 | 1; commit: string; code: string }
+  | { type: 'welcome'; you: 0 | 1; commit: string; code: string; resumed?: boolean }
+  | { type: 'peer'; away: boolean }
   | { type: 'roster'; names: (string | null)[] }
   | { type: 'start'; t0: number; names: [string, string]; live: LiveInfo | null; commit: string }
   | { type: 'course'; obs: Obs[] }

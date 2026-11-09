@@ -1,6 +1,7 @@
 import { generateCourse, sortCourse, type Obs } from '../shared/course';
-import { MAX_TICKS, TICK_HZ } from '../shared/constants';
-import { cloneState, initState, sameState, step, type Key, type PState } from '../shared/sim';
+import { TICK_HZ } from '../shared/constants';
+import { COURSE_LEN, RULES, TICK_CAP } from './variant';
+import { CLASSIC, tired, cloneState, initState, sameState, step, type Key, type PState } from '../shared/sim';
 import { Bot } from '../shared/bot';
 import { randomHex } from '../shared/hash';
 import type { Conn } from './net';
@@ -9,6 +10,7 @@ import type { LiveInfo } from '../shared/protocol';
 export type Mode = 'online' | 'practice' | 'attract';
 
 const HISTORY = 420;
+const MAX_ONLINE = 60 * 180;
 
 /**
  * A race as seen by this browser. "me" is simulated locally from my own key presses (no lag);
@@ -30,9 +32,9 @@ export class Session {
   private outbox: [number, Key][] = [];
   private bots: [Bot | null, Bot | null] = [null, null];
   private oppSnap: { st: PState; at: number } | null = null;
-  /** Recent foot press times, for the rhythm meter. */
-  readonly footTimes: number[] = [];
   resyncs = 0;
+  /** Online races always use the server's (classic) rules. */
+  rules = CLASSIC;
 
   private constructor(readonly mode: Mode, t0: number, clock: () => number, readonly conn: Conn | null = null) {
     this.t0 = t0;
@@ -42,10 +44,11 @@ export class Session {
   static practice(mode: 'practice' | 'attract', skill = 0.7, live: LiveInfo | null = null): Session {
     const s = new Session(mode, performance.now() + (mode === 'attract' ? 0 : 3500), () => performance.now());
     const seed = randomHex(32);
-    s.course = generateCourse(seed + seed, !!live?.active);
+    s.course = generateCourse(seed + seed, !!live?.active, COURSE_LEN);
+    s.rules = RULES;
     s.live = live;
-    s.names = mode === 'attract' ? ['Pip', 'Nugget'] : ['You', 'Bot Biscuit'];
-    if (mode === 'attract') s.bots[0] = new Bot(randomHex(16), 0.8);
+    s.names = mode === 'attract' ? ['Pip', 'Nugget'] : ['You', 'Biscuit (bot)'];
+    if (mode === 'attract') s.bots[0] = new Bot(randomHex(16), 0.9);
     s.bots[1] = new Bot(randomHex(16), skill);
     return s;
   }
@@ -70,16 +73,12 @@ export class Session {
   }
 
   press(k: Key) {
-    if (this.ended || this.mode === 'attract') return;
+    if (this.ended || this.mode === 'attract' || this.countdownMs() > 0) return;
     const t = Math.max(0, this.clockTick(), this.me.tick);
     const list = this.myInputs.get(t) ?? [];
     list.push(k);
     this.myInputs.set(t, list);
     if (this.mode === 'online') this.outbox.push([t, k]);
-    if (k === 'L' || k === 'R') {
-      this.footTimes.push(performance.now());
-      if (this.footTimes.length > 12) this.footTimes.shift();
-    }
   }
 
   addObstacles(obs: Obs[]) {
@@ -107,14 +106,14 @@ export class Session {
     this.history.clear();
     while (s.tick < target) {
       this.history.set(s.tick, cloneState(s));
-      step(s, this.myInputs.get(s.tick) ?? [], this.course);
+      step(s, this.myInputs.get(s.tick) ?? [], this.course, this.rules);
     }
     this.me = s;
   }
 
   /** Advances local simulation to the clock and flushes inputs to the server. */
   update() {
-    const target = Math.min(this.clockTick(), MAX_TICKS);
+    const target = Math.min(this.clockTick(), this.mode === 'online' ? MAX_ONLINE : TICK_CAP);
     if (target < 0) return;
     let guard = 0;
     while (this.me.tick <= target && guard++ < 600) {
@@ -124,10 +123,10 @@ export class Session {
         this.history.delete(t - HISTORY);
       }
       const keys = this.bots[0] ? this.bots[0].keys(this.me, this.course) : this.myInputs.get(t) ?? [];
-      step(this.me, keys, this.course);
+      step(this.me, keys, this.course, this.rules);
       if (this.mode !== 'online') {
         this.myInputs.delete(t);
-        step(this.opp, this.bots[1]!.keys(this.opp, this.course), this.course);
+        step(this.opp, this.bots[1]!.keys(this.opp, this.course), this.course, this.rules);
       }
     }
     if (this.mode === 'online' && this.outbox.length) {
@@ -139,17 +138,11 @@ export class Session {
   oppView(): PState {
     if (this.mode !== 'online' || !this.oppSnap) return this.opp;
     const v = cloneState(this.oppSnap.st);
-    if (v.finishTick < 0) {
+    if (!tired(v)) {
       const ahead = Math.min(0.5, (performance.now() - this.oppSnap.at) / 1000 + 0.4);
       v.dist += v.speed * ahead;
     }
     return v;
   }
 
-  /** Presses per second from the last few foot presses. */
-  cadence(): number {
-    const f = this.footTimes;
-    if (f.length < 3 || performance.now() - f[f.length - 1] > 600) return 0;
-    return ((f.length - 1) * 1000) / (f[f.length - 1] - f[0]);
-  }
 }

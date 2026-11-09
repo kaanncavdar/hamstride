@@ -3,20 +3,23 @@ import type { Env } from './env';
 import type { Board } from './board';
 import { fetchLive } from './live';
 import {
-  CONFIRM_LAG_TICKS, COUNTDOWN_MS, FINISH_M, FUTURE_TOLERANCE_TICKS, MAX_BLOCK_DROPS,
+  CONFIRM_LAG_TICKS, COUNTDOWN_MS, FUTURE_TOLERANCE_TICKS, MAX_BLOCK_DROPS,
   MAX_INPUTS_PER_SEC, MAX_TICKS, REVEAL_AHEAD_M, TICK_HZ,
 } from '../src/shared/constants';
-import { courseHash, generateCourse, sortCourse, type Obs } from '../src/shared/course';
-import { HEX32, HEX64, randomHex, sha256Hex } from '../src/shared/hash';
+import { courseHash, generateCourse, LEN, sortCourse, type Obs } from '../src/shared/course';
+import { HEX32, randomHex, sha256Hex } from '../src/shared/hash';
 import { cleanName, type ClientMsg, type LiveInfo, type ServerMsg } from '../src/shared/protocol';
-import { finishTime, initState, KEYS, step, type Key, type PState } from '../src/shared/sim';
+import { tiredAt, winnerAtCap, initState, KEYS, step, type Key, type PState } from '../src/shared/sim';
 import { humanReport } from '../src/shared/stats';
 
 interface Player {
-  ws: WebSocket;
+  /** null while the player is disconnected mid-race; they can come back until it ends. */
+  ws: WebSocket | null;
   name: string;
-  /** sha256 of the browser's secret player id; the leaderboard key. */
+  /** Who this is: a signed-in wallet address (lowercase), or `guest:<hash>` in dev. The leaderboard key. */
   key: string;
+  away: boolean;
+  awaySince: number;
   seed: string | null;
   webdriver: boolean;
   st: PState;
@@ -52,30 +55,75 @@ export class Room extends DurableObject<Env> {
   private drops = 0;
   private nextDropId = 1000;
   private code = '';
+  private startCommit = '';
+
+  private sentOrder: Obs[] = [];
+  private lastEnd: ServerMsg | null = null;
 
   async fetch(req: Request): Promise<Response> {
     if (!this.commit) this.commit = await sha256Hex(this.serverSeed);
     this.code = new URL(req.url).pathname.split('/').pop() ?? '';
+    // Set by the Worker after it checked the wallet session; clients can't forge it.
+    const id = req.headers.get('X-Player-Id') ?? '';
     const pair = new WebSocketPair();
     const ws = pair[1];
     ws.accept();
+    const reply = () => new Response(null, { status: 101, webSocket: pair[0] });
+    if (!id) {
+      this.send(ws, { type: 'error', msg: 'Connect your wallet to play online.' });
+      ws.close(1008, 'auth');
+      return reply();
+    }
+
+    // Coming back to a race you dropped out of (or a second tab): take your seat back.
+    const mine = this.players.findIndex((p) => p?.key === id);
+    if (mine >= 0) {
+      const p = this.players[mine]!;
+      if (p.ws && p.ws !== ws) {
+        try {
+          p.ws.close(4000, 'replaced');
+        } catch {
+          /* ignore */
+        }
+      }
+      p.ws = ws;
+      const wasAway = p.away;
+      p.away = false;
+      this.listen(mine as 0 | 1, ws);
+      const live = this.phase === 'running' || this.phase === 'countdown';
+      this.send(ws, { type: 'welcome', you: mine as 0 | 1, commit: this.commit, code: this.code, resumed: live });
+      if (live) {
+        const [a, b] = this.players;
+        this.send(ws, { type: 'start', t0: this.t0, names: [a?.name ?? '?', b?.name ?? '?'], live: this.live, commit: this.startCommit });
+        if (this.sentOrder.length) this.send(ws, { type: 'course', obs: this.sentOrder });
+        if (a && b) this.send(ws, { type: 'snap', p: [a.st, b.st] });
+        if (wasAway) this.sendOther(mine as 0 | 1, { type: 'peer', away: false });
+      } else if (this.phase === 'ended' && this.lastEnd) this.send(ws, this.lastEnd);
+      this.roster();
+      return reply();
+    }
 
     const slot = this.players.findIndex((p) => p === null);
     if (slot < 0 || this.phase !== 'lobby') {
       this.send(ws, { type: 'error', msg: slot < 0 ? 'This room is full.' : 'This match has already started.' });
       ws.close(1008, 'full');
-      return new Response(null, { status: 101, webSocket: pair[0] });
+      return reply();
     }
 
     const p: Player = {
-      ws, name: 'Hamster', key: '', seed: null, webdriver: false, st: initState(),
+      ws, name: 'Hamster', key: id, away: false, awaySince: 0, seed: null, webdriver: false, st: initState(),
       q: [], log: [], late: 0, dropped: 0, rateSec: 0, rateCount: 0,
     };
     this.players[slot] = p;
+    this.listen(slot as 0 | 1, ws);
     this.send(ws, { type: 'welcome', you: slot as 0 | 1, commit: this.commit, code: this.code });
     this.roster();
+    return reply();
+  }
 
+  private listen(slot: 0 | 1, ws: WebSocket) {
     ws.addEventListener('message', (ev) => {
+      if (this.players[slot]?.ws !== ws) return;
       if (typeof ev.data !== 'string' || ev.data.length > 4096) return;
       let msg: ClientMsg;
       try {
@@ -83,12 +131,16 @@ export class Room extends DurableObject<Env> {
       } catch {
         return;
       }
-      this.onMessage(slot as 0 | 1, msg).catch(() => {});
+      this.onMessage(slot, msg).catch(() => {});
     });
-    const gone = () => this.onLeave(slot as 0 | 1, ws);
+    const gone = () => this.onLeave(slot, ws);
     ws.addEventListener('close', gone);
     ws.addEventListener('error', gone);
-    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  private sendOther(slot: 0 | 1, m: ServerMsg) {
+    const o = this.players[slot === 0 ? 1 : 0];
+    if (o?.ws) this.send(o.ws, m);
   }
 
   private send(ws: WebSocket, m: ServerMsg) {
@@ -103,7 +155,7 @@ export class Room extends DurableObject<Env> {
     const text = JSON.stringify(m);
     for (const p of this.players) {
       try {
-        p?.ws.send(text);
+        p?.ws?.send(text);
       } catch {
         /* ignore */
       }
@@ -123,13 +175,12 @@ export class Room extends DurableObject<Env> {
     if (!p) return;
     switch (m.type) {
       case 'ping':
-        if (typeof m.c === 'number') this.send(p.ws, { type: 'pong', c: m.c, s: Date.now() });
+        if (typeof m.c === 'number' && p.ws) this.send(p.ws, { type: 'pong', c: m.c, s: Date.now() });
         return;
       case 'hello':
-        if (p.seed || !HEX32.test(String(m.seed)) || !HEX64.test(String(m.pid))) return;
+        if (p.seed || !HEX32.test(String(m.seed))) return;
         p.name = cleanName(m.name);
         p.seed = m.seed;
-        p.key = await sha256Hex(`wheel-duel:${m.pid}`);
         p.webdriver = m.wd === true;
         this.roster();
         this.maybeStart();
@@ -141,7 +192,7 @@ export class Room extends DurableObject<Env> {
           this.phase = 'lobby';
           this.maybeStart();
         } else {
-          for (const x of this.players) if (x && x !== p) this.send(x.ws, { type: 'rematch_wait' });
+          for (const x of this.players) if (x && x !== p && x.ws) this.send(x.ws, { type: 'rematch_wait' });
         }
         return;
       case 'in':
@@ -158,6 +209,8 @@ export class Room extends DurableObject<Env> {
       p.rateCount = 0;
     }
     const now = this.nowTick();
+    // Nothing counts before GO: otherwise countdown taps would all land on tick 0.
+    if (now < 0) return;
     for (const item of a.slice(0, 30)) {
       if (!Array.isArray(item)) continue;
       let [t, k] = item as [number, Key];
@@ -197,6 +250,9 @@ export class Room extends DurableObject<Env> {
     this.drops = 0;
     this.course = generateCourse(courseSeed, !!this.live?.active);
     this.sent = new Set();
+    this.sentOrder = [];
+    this.startCommit = this.commit;
+    this.lastEnd = null;
     for (const p of [a, b]) {
       p.st = initState();
       p.q = [];
@@ -257,6 +313,7 @@ export class Room extends DurableObject<Env> {
     const out = this.course.filter((o) => o.d <= lead + REVEAL_AHEAD_M && !this.sent.has(o.id));
     if (!out.length) return;
     for (const o of out) this.sent.add(o.id);
+    this.sentOrder.push(...out);
     this.broadcast({ type: 'course', obs: out });
   }
 
@@ -268,10 +325,9 @@ export class Room extends DurableObject<Env> {
     if (h <= this.lastBlock || this.drops >= MAX_BLOCK_DROPS) return;
     this.lastBlock = h;
     const lead = Math.max(...this.players.map((p) => p?.st.dist ?? 0));
-    let d = Math.round((lead + REVEAL_AHEAD_M - 4) * 10) / 10;
-    if (d > FINISH_M - 20) return;
-    while (this.course.some((o) => Math.abs(o.d - d) < 2)) d += 2.5;
-    this.course.push({ id: this.nextDropId++, d, kind: 'bdrop', lane: -1 });
+    let d = Math.round((lead + REVEAL_AHEAD_M - 6) * 10) / 10;
+    while (this.course.some((o) => Math.abs(o.d - d) < 3)) d += 3;
+    this.course.push({ id: this.nextDropId++, d, kind: 'bdrop', lane: this.drops % 3, len: LEN.bdrop });
     sortCourse(this.course);
     this.drops++;
   }
@@ -279,21 +335,29 @@ export class Room extends DurableObject<Env> {
   private checkEnd(target: number) {
     const [a, b] = this.players;
     if (!a || !b) return;
-    const fa = finishTime(a.st);
-    const fb = finishTime(b.st);
-    if (fa < Infinity && fb < Infinity) this.end(fa === fb ? -1 : fa < fb ? 0 : 1, 'finish');
-    else if (fa < Infinity && b.st.tick > fa) this.end(0, 'finish');
-    else if (fb < Infinity && a.st.tick > fb) this.end(1, 'finish');
-    else if (target >= MAX_TICKS) this.end(a.st.dist === b.st.dist ? -1 : a.st.dist > b.st.dist ? 0 : 1, 'timeout');
+    // Last one running wins. A leaver's hamster keeps running with nobody steering, so it soon tires out.
+    const ca = tiredAt(a.st);
+    const cb = tiredAt(b.st);
+    if (ca < Infinity && cb < Infinity) {
+      if (ca === cb) this.end(a.st.dist === b.st.dist ? -1 : a.st.dist > b.st.dist ? 0 : 1, 'tired');
+      else this.end(ca > cb ? 0 : 1, 'tired');
+    } else if (ca < Infinity && b.st.tick > ca) this.end(1, a.away ? 'forfeit' : 'tired');
+    else if (cb < Infinity && a.st.tick > cb) this.end(0, b.away ? 'forfeit' : 'tired');
+    else if (target >= MAX_TICKS) {
+      // Both still running after 3 minutes: more energy left wins, then distance.
+      this.end(winnerAtCap(a.st, b.st), 'timeout');
+    } else if (a.away && b.away && Date.now() - Math.max(a.awaySince, b.awaySince) > 30_000) {
+      this.end(-1, 'abandoned');
+    }
   }
 
-  private async end(winner: 0 | 1 | -1, reason: 'finish' | 'timeout' | 'forfeit') {
+  private async end(winner: 0 | 1 | -1, reason: 'tired' | 'timeout' | 'forfeit' | 'abandoned') {
     if (this.phase === 'ended') return;
     this.phase = 'ended';
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     const [a, b] = this.players as [Player, Player];
-    const cvMin = Number(this.env.BOT_CV_MIN) || 0.06;
+    const cvMin = Number(this.env.BOT_CV_MIN) || 0.12;
     const human: [ReturnType<typeof humanReport>, ReturnType<typeof humanReport>] = [
       humanReport(a?.st ?? initState(), cvMin),
       humanReport(b?.st ?? initState(), cvMin),
@@ -303,28 +367,36 @@ export class Room extends DurableObject<Env> {
     const cHash = await courseHash(this.course);
     // Ranked only when both look human, nobody automated the browser, and the match was raced out.
     const ranked =
-      reason !== 'timeout' && winner !== -1 && !!a && !!b && a.key !== b.key &&
-      human.every((h) => h.verdict === 'human') && !a.webdriver && !b.webdriver &&
-      (reason === 'finish' || Math.max(a.st.dist, b.st.dist) > 100);
+      reason !== 'abandoned' && winner !== -1 && !!a && !!b && a.key !== b.key &&
+      human.every((h) => h.verdict !== 'steady') && !a.webdriver && !b.webdriver &&
+      Math.max(a.st.dist, b.st.dist) > 150;
 
     this.serverSeed = randomHex(32);
     this.commit = await sha256Hex(this.serverSeed);
     for (const p of this.players) if (p) p.seed = null;
 
-    this.broadcast({
+    const endMsg: ServerMsg = {
       type: 'end', winner, reason, final: [a?.st ?? initState(), b?.st ?? initState()], reveal,
       courseHash: cHash, inputHash, human, ranked, nextCommit: this.commit,
-    });
+    };
+    this.lastEnd = endMsg;
+    this.broadcast(endMsg);
+    // Players who never came back give up their seat so the room can be reused.
+    for (let i = 0; i < 2; i++) if (this.players[i]?.away) this.players[i] = null;
+    if (!this.players[0] || !this.players[1]) {
+      this.broadcast({ type: 'left' });
+      this.roster();
+    }
 
     if (ranked && (winner === 0 || winner === 1)) {
       const w = winner === 0 ? a : b;
-      const ft = finishTime(w.st);
       const board = this.env.BOARD.get(this.env.BOARD.idFromName('global')) as DurableObjectStub<Board>;
+      // "Best" on the leaderboard is the longest run, in metres.
       await board.record({
         a: { key: a.key, name: a.name },
         b: { key: b.key, name: b.name },
         winner,
-        winnerMs: ft < Infinity ? Math.round((ft * 1000) / TICK_HZ) : null,
+        best: Math.round(w.st.dist),
       });
     }
   }
@@ -333,16 +405,12 @@ export class Room extends DurableObject<Env> {
     const p = this.players[slot];
     if (!p || p.ws !== ws) return;
     if (this.phase === 'running' || this.phase === 'countdown') {
-      const other = slot === 0 ? 1 : 0;
-      if (this.players[other]) {
-        this.end(other as 0 | 1, 'forfeit').finally(() => {
-          this.players[slot] = null;
-          this.broadcast({ type: 'left' });
-          this.phase = 'lobby';
-          this.roster();
-        });
-        return;
-      }
+      // Mid-race: keep the seat. The wheel stops while you're gone; come back before the race ends.
+      p.ws = null;
+      p.away = true;
+      p.awaySince = Date.now();
+      this.sendOther(slot, { type: 'peer', away: true });
+      return;
     }
     this.players[slot] = null;
     if (this.phase === 'ended') this.phase = 'lobby';

@@ -11,4 +11,8 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** Rhythm steadiness below which a run is treated as scripted (kept out of the repo on purpose). */
   BOT_CV_MIN?: string;
+  /** Sepolia JSON-RPC used to verify smart-contract wallet signatures. */
+  SEPOLIA_RPC?: string;
+  /** Dev only: lets browsers without a wallet play online as guests. Never set in production. */
+  ALLOW_GUESTS?: string;
 }

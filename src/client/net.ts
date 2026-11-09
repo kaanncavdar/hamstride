@@ -25,11 +25,11 @@ export class Conn {
   private bestRtt = Infinity;
   private pinger: ReturnType<typeof setInterval> | null = null;
 
-  static async open(path: string): Promise<Conn> {
+  static async open(path: string, extra = ''): Promise<Conn> {
     const c = new Conn();
     const q = await ticketQuery();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    c.ws = new WebSocket(`${proto}://${location.host}${path}?${q}`);
+    c.ws = new WebSocket(`${proto}://${location.host}${path}?${q}${extra ? `&${extra}` : ''}`);
     await new Promise<void>((resolve, reject) => {
       c.ws.addEventListener('open', () => resolve(), { once: true });
       c.ws.addEventListener('error', () => reject(new Error('Could not connect to the game server.')), { once: true });

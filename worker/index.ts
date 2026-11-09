@@ -1,6 +1,8 @@
 import type { Env } from './env';
 import type { Board } from './board';
 import { issueTicket, verifyTicket } from './ticket';
+import { clearCookie, issueNonce, sessionAddress, sessionCookie, verifySignIn } from './auth';
+import { sha256Hex } from '../src/shared/hash';
 import { ROOM_CODE } from '../src/shared/protocol';
 
 export { Room } from './room';
@@ -64,6 +66,21 @@ export default {
         return json(await issueTicket(env));
       }
 
+      if (url.pathname.startsWith('/api/auth/')) {
+        if (!originOk(req, env)) return json({ error: 'forbidden' }, { status: 403 });
+        const route = url.pathname.slice('/api/auth/'.length);
+        if (route === 'nonce' && req.method === 'GET') return json(await issueNonce(env));
+        if (route === 'me' && req.method === 'GET') return json({ address: await sessionAddress(env, req), guests: env.ALLOW_GUESTS === 'true' });
+        if (route === 'logout' && req.method === 'POST') return json({ ok: true }, { headers: { 'Set-Cookie': clearCookie() } });
+        if (route === 'verify' && req.method === 'POST') {
+          if (Number(req.headers.get('content-length') ?? 0) > 8000) return json({ error: 'too_large' }, { status: 413 });
+          const out = await verifySignIn(env, req, await req.json().catch(() => null));
+          if ('error' in out) return json(out, { status: 401 });
+          return json(out, { headers: { 'Set-Cookie': await sessionCookie(env, out.address) } });
+        }
+        return json({ error: 'not_found' }, { status: 404 });
+      }
+
       if (url.pathname === '/api/leaderboard') {
         const board = env.BOARD.get(env.BOARD.idFromName('global')) as DurableObjectStub<Board>;
         return json({ rows: await board.top(25) }, { headers: { 'cache-control': 'public, max-age=15' } });
@@ -71,12 +88,20 @@ export default {
 
       if (url.pathname === '/ws/lobby' || url.pathname.startsWith('/ws/room/')) {
         if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 });
-        if (!originOk(req, env)) return new Response('Forbidden origin', { status: 403 });
+        if (!originOk(req, env)) return new Response(`Forbidden origin${env.ALLOW_GUESTS === 'true' ? ` (${req.headers.get('Origin')})` : ''}`, { status: 403 });
         if (!(await verifyTicket(env, url.searchParams))) return new Response('Invalid ticket', { status: 403 });
-        if (url.pathname === '/ws/lobby') return env.LOBBY.get(env.LOBBY.idFromName('main')).fetch(req);
+        // Online play needs a signed-in wallet. Who you are comes only from the session cookie.
+        let player = await sessionAddress(env, req);
+        const guest = url.searchParams.get('g') ?? '';
+        if (!player && env.ALLOW_GUESTS === 'true' && /^[0-9a-f]{64}$/.test(guest)) player = `guest:${(await sha256Hex(guest)).slice(0, 40)}`;
+        if (!player) return new Response('Sign in with your wallet first', { status: 401 });
+        const fwd = new Request(req);
+        fwd.headers.delete('X-Player-Id');
+        fwd.headers.set('X-Player-Id', player);
+        if (url.pathname === '/ws/lobby') return env.LOBBY.get(env.LOBBY.idFromName('main')).fetch(fwd);
         const code = url.pathname.slice('/ws/room/'.length);
         if (!ROOM_CODE.test(code)) return new Response('Bad room code', { status: 400 });
-        return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(req);
+        return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(fwd);
       }
     } catch (e) {
       return json({ error: 'server_error', detail: e instanceof Error ? e.message : 'unknown' }, { status: 500 });

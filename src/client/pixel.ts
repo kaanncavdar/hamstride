@@ -98,6 +98,53 @@ const SPRITES: Record<string, string[]> = {
     '.ssSSssSSss.',
     '...ssssss...',
   ],
+  worm: [
+    '..........',
+    '.....ddd..',
+    '...ddkYdd.',
+    '..dYYYYYd.',
+    '.dYYdddd..',
+    '.dYd......',
+    '.dYYd.....',
+    '..dYYYdd..',
+    '...ddYYYd.',
+    '.....dddd.',
+  ],
+  truck: [
+    '.....wwww...',
+    '.....wkkw...',
+    'rrrrrwwwwrr.',
+    'rrrrrrrrrrrr',
+    'rrwrrrrrrrrr',
+    'rrrrrrrrrrrr',
+    '.kk.....kk..',
+    '.kk.....kk..',
+  ],
+  pit: [
+    '.tttttttttt.',
+    'tkkkkkkkkkkt',
+    'tkkkkkkkkkkt',
+    'tkkkkkkkkkkt',
+    'tkkkkkkkkkkt',
+    '.tttttttttt.',
+  ],
+  ramp: [
+    '..........yy',
+    '........yyyy',
+    '......yyyyyy',
+    '....yyyyyyyy',
+    '..yyyyyyyyyy',
+    'yyyyyyyyyyyy',
+  ],
+  pad: [
+    'SSSSSSSSSSSS',
+    'SssSSssSSssS',
+    'SSssSSssSSsS',
+    'SSSssSSssSSs',
+    'SSssSSssSSsS',
+    'SssSSssSSssS',
+    'SSSSSSSSSSSS',
+  ],
   eye: [
     '...kkkk...',
     '.kkeeeekk.',
@@ -138,5 +185,45 @@ export function hydrateSprites(root: ParentNode = document) {
     const name = el.dataset.sprite as SpriteName;
     if (!SPRITES[name]) return;
     el.innerHTML = spriteSvg(name, Number(el.dataset.scale) || 4);
+  });
+}
+
+/** 5×7 dot-matrix glyphs for the logo, in the LED style Squeekchain uses. */
+const GLYPHS: Record<string, string[]> = {
+  S: ['.###.', '#...#', '#....', '.###.', '....#', '#...#', '.###.'],
+  Q: ['.###.', '#...#', '#...#', '#...#', '#.#.#', '#..#.', '.##.#'],
+  U: ['#...#', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
+  E: ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
+  K: ['#...#', '#..#.', '#.#..', '##...', '#.#..', '#..#.', '#...#'],
+  P: ['####.', '#...#', '#...#', '####.', '#....', '#....', '#....'],
+  R: ['####.', '#...#', '#...#', '####.', '#.#..', '#..#.', '#...#'],
+  I: ['.###.', '..#..', '..#..', '..#..', '..#..', '..#..', '.###.'],
+  N: ['#...#', '##..#', '#.#.#', '#..##', '#...#', '#...#', '#...#'],
+  T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
+};
+
+let gradId = 0;
+/** Renders a word as a dot-matrix SVG with a top-to-bottom colour gradient. */
+export function dotText(text: string, top: string, bottom: string): string {
+  const id = `dg${gradId++}`;
+  let dots = '';
+  let x0 = 0;
+  for (const ch of text.toUpperCase()) {
+    const g = GLYPHS[ch] ?? GLYPHS[' '];
+    g.forEach((row, y) => {
+      for (let x = 0; x < 5; x++) {
+        if (row[x] === '#') dots += `<rect x="${x0 + x + 0.08}" y="${y + 0.08}" width="0.84" height="0.84" rx="0.18"/>`;
+      }
+    });
+    x0 += 6;
+  }
+  const w = x0 - 1;
+  return `<svg class="dots" viewBox="0 0 ${w} 7" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="7" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bottom}"/></linearGradient></defs><g fill="url(#${id})">${dots}</g></svg>`;
+}
+
+export function hydrateDotText(root: ParentNode = document) {
+  root.querySelectorAll<HTMLElement>('[data-dots]').forEach((el) => {
+    el.innerHTML = dotText(el.dataset.dots ?? '', el.dataset.top ?? '#ffe3a3', el.dataset.bottom ?? '#d9772b');
   });
 }
