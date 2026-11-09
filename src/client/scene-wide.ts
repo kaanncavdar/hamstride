@@ -566,6 +566,12 @@ export class WideArena {
     this.postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.post));
   }
 
+  /** Render at a fraction of the screen's resolution (1 = full, capped at 1.75x) to keep the frame rate up. */
+  setQuality(scale: number) {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75) * scale);
+    this.resize();
+  }
+
   resize() {
     const el = this.canvas.parentElement ?? this.canvas;
     const w = Math.max(2, el.clientWidth);

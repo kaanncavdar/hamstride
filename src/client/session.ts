@@ -15,7 +15,8 @@ const MAX_ONLINE = MAX_TICKS;
 /**
  * A race as seen by this browser. "me" is simulated locally from my own key presses (no lag);
  * online, the server re-runs it and sends back its confirmed state, and we rewind and replay if
- * we disagree. The rival is drawn from the server's snapshots.
+ * we disagree. The rival is drawn from the server's last confirmed state, run forward with their
+ * key presses as the server relays them, so their moves look as smooth as your own.
  */
 export class Session {
   course: Obs[] = [];
@@ -32,6 +33,10 @@ export class Session {
   private outbox: [number, Key][] = [];
   private bots: [Bot | null, Bot | null] = [null, null];
   private oppSnap: { st: PState; at: number } | null = null;
+  /** The rival's relayed key presses, by tick (display only). */
+  private oppInputs = new Map<number, Key[]>();
+  /** The rival run forward from the last snapshot; rebuilt when a snapshot or a past press arrives. */
+  private oppPred: PState | null = null;
   resyncs = 0;
   /** Online races always use the server's rules. */
   rules = GAME_RULES;
@@ -63,16 +68,39 @@ export class Session {
 
   you: 0 | 1 = 0;
 
+  /** When an offline race was paused (ms on its clock), or null. Online races can't pause. */
+  private pausedAt: number | null = null;
+  private now() {
+    return this.pausedAt ?? this.clock();
+  }
+
+  get paused() {
+    return this.pausedAt !== null;
+  }
+
+  /** Practice only: stop the clock (the wheel freezes) until resume(). */
+  pause() {
+    if (this.mode === 'online' || this.pausedAt !== null || this.ended) return;
+    this.pausedAt = this.clock();
+  }
+
+  resume() {
+    if (this.pausedAt === null) return;
+    this.t0 += this.clock() - this.pausedAt;
+    this.pausedAt = null;
+  }
+
   /** Current tick by the clock; negative during the countdown. */
   clockTick() {
-    return Math.floor(((this.clock() - this.t0) * TICK_HZ) / 1000);
+    return Math.floor(((this.now() - this.t0) * TICK_HZ) / 1000);
   }
 
   countdownMs() {
-    return this.t0 - this.clock();
+    return this.t0 - this.now();
   }
 
   press(k: Key) {
+    if (this.pausedAt !== null) return;
     if (this.ended || this.mode === 'attract' || this.countdownMs() > 0) return;
     const t = Math.max(0, this.clockTick(), this.me.tick);
     const list = this.myInputs.get(t) ?? [];
@@ -93,6 +121,8 @@ export class Session {
     const theirs = p[this.you === 0 ? 1 : 0];
     this.oppSnap = { st: theirs, at: performance.now() };
     this.opp = cloneState(theirs);
+    this.oppPred = null;
+    for (const t of this.oppInputs.keys()) if (t < theirs.tick) this.oppInputs.delete(t);
     const local = this.history.get(mine.tick);
     if (local && sameState(local, mine)) return;
     if (mine.tick > this.me.tick) {
@@ -111,8 +141,20 @@ export class Session {
     this.me = s;
   }
 
+  /** The server's final states: freeze both hamsters exactly there, so the screen matches the result. */
+  finish(p: [PState, PState]) {
+    this.ended = true;
+    this.me = cloneState(p[this.you]);
+    const theirs = p[this.you === 0 ? 1 : 0];
+    this.opp = cloneState(theirs);
+    this.oppSnap = { st: cloneState(theirs), at: performance.now() };
+    this.oppPred = cloneState(theirs);
+    this.oppInputs.clear();
+  }
+
   /** Advances local simulation to the clock and flushes inputs to the server. */
   update() {
+    if (this.ended && this.mode === 'online') return;
     const target = Math.min(this.clockTick(), this.mode === 'online' ? MAX_ONLINE : TICK_CAP);
     if (target < 0) return;
     let guard = 0;
@@ -134,15 +176,34 @@ export class Session {
     }
   }
 
-  /** The rival for drawing: the last confirmed state, nudged forward by its speed. */
+  /** The rival's key presses, relayed by the server as they arrive. */
+  onOppInputs(a: [number, Key][]) {
+    if (this.mode !== 'online' || !Array.isArray(a)) return;
+    for (const [t, k] of a) {
+      if (!Number.isInteger(t) || (this.oppSnap && t < this.oppSnap.st.tick)) continue;
+      const list = this.oppInputs.get(t) ?? [];
+      list.push(k);
+      this.oppInputs.set(t, list);
+      // A press for a tick we already ran forward: run it again from the snapshot.
+      if (this.oppPred && t < this.oppPred.tick) this.oppPred = null;
+    }
+  }
+
+  /**
+   * The rival for drawing: the last confirmed state, run forward to now with their relayed presses
+   * (the same engine as your own hamster). Ticks whose presses haven't arrived yet run with none, and
+   * the next snapshot or press corrects them. Display only: results come from the server.
+   */
   oppView(): PState {
     if (this.mode !== 'online' || !this.oppSnap) return this.opp;
-    const v = cloneState(this.oppSnap.st);
-    if (!tired(v)) {
-      const ahead = Math.min(0.5, (performance.now() - this.oppSnap.at) / 1000 + 0.4);
-      v.dist += v.speed * ahead;
+    if (!this.oppPred) this.oppPred = cloneState(this.oppSnap.st);
+    if (this.ended) return this.oppPred;
+    const target = Math.min(this.clockTick(), MAX_ONLINE);
+    let guard = 0;
+    while (this.oppPred.tick < target && !tired(this.oppPred) && guard++ < 600) {
+      step(this.oppPred, this.oppInputs.get(this.oppPred.tick) ?? [], this.course, this.rules);
     }
-    return v;
+    return this.oppPred;
   }
 
 }

@@ -272,7 +272,10 @@ input::placeholder { color: #a29d8f; }
 #countdown small { display: block; font-size: 20px; color: #fff; text-align: center; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
 #night-badge { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: rgba(26, 26, 32, 0.9); color: var(--gold2); padding: 6px 14px; display: flex; gap: 10px; align-items: center; font-weight: 700; border-radius: 8px; white-space: nowrap; }
 #peer-banner { position: absolute; left: 50%; top: 84px; transform: translateX(-50%); z-index: 4; background: rgba(26, 26, 32, 0.92); color: #fff; border: 1px solid #8fd8ff; padding: 8px 14px; border-radius: 10px; font-size: 14px; max-width: 90vw; text-align: center; }
-.play-tools { position: absolute; right: 12px; bottom: 12px; z-index: 5; display: flex; gap: 8px; }
+.play-tools { position: absolute; right: 12px; bottom: 12px; z-index: 5; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.play-tools .ic { display: none; }
+#pause .row, #gl-lost .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+#pause .small { font-size: 12px; margin-top: 12px; }
 #coach { position: absolute; left: 25%; bottom: 72px; transform: translateX(-50%); max-width: min(46vw, 520px); background: rgba(26, 26, 32, 0.92); color: #fff; border: 1px solid #8fd8ff; border-radius: 10px; padding: 10px 14px; display: flex; gap: 10px; align-items: center; font-size: 15px; font-weight: 500; z-index: 4; pointer-events: none; animation: coachIn 0.18s ease-out; }
 #coach kbd { font-size: 14px; padding: 2px 9px; background: transparent; border-color: #8fd8ff; color: #8fd8ff; }
 @keyframes coachIn { from { opacity: 0; transform: translate(-50%, 8px); } }
@@ -282,13 +285,6 @@ input::placeholder { color: #a29d8f; }
 .flash { position: absolute; inset: 0; background: #fff; opacity: 0.35; pointer-events: none; animation: flashOut 0.25s ease-out forwards; }
 @keyframes flashOut { to { opacity: 0; } }
 
-#touch { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; align-items: flex-end; padding: 10px; gap: 10px; z-index: 4; }
-.pad { font: 700 20px var(--font); color: #1a1a20; background: rgba(255, 255, 255, 0.9); border: 0; border-radius: 12px; touch-action: none; }
-.pad:active { transform: scale(0.96); }
-.pad-col { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
-.pad.foot { width: 28vw; height: 24vw; max-width: 150px; max-height: 120px; font-size: 30px; }
-.pad.lane { height: 46px; background: rgba(143, 156, 255, 0.95); }
-.pad.act { flex: 1; max-width: 160px; height: 64px; background: rgba(247, 180, 90, 0.95); align-self: flex-end; }
 
 @media (max-width: 900px) {
   .live-grid { grid-template-columns: 1fr; }
@@ -303,8 +299,14 @@ input::placeholder { color: #a29d8f; }
   .topbar { padding: 10px; }
   .brand { display: none; }
   .side { padding: 8px; }
-  .meter { width: 160px; }
+  .meter { width: auto; min-width: 150px; max-width: none; }
+  .meter .lbl { font-size: 10px; }
   .toast { font-size: 26px; }
+  /* Phones: small icon buttons in the top-right corner, clear of the hamsters and the camera label. */
+  .play-tools { top: 10px; bottom: auto; right: 10px; gap: 6px; flex-wrap: nowrap; }
+  .play-tools .btn { min-width: 38px; height: 38px; padding: 0 10px; font-size: 15px; }
+  .play-tools .ic { display: inline; }
+  .play-tools .tx { display: none; }
   .catbar { font-size: 15px; }
   #countdown { font-size: 90px; }
   .k { min-width: 44px; height: 42px; }
@@ -370,3 +372,7 @@ input::placeholder { color: #a29d8f; }
 .stake-rows div { display: flex; justify-content: space-between; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
 .payout { border: 1px solid var(--gold2); border-radius: 10px; padding: 10px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; }
 .payout p { margin: 0; }
+
+/* Invite links: point at the JOIN box instead of joining before you can pick a name. */
+.invite-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--gold) 18%, transparent); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); font-size: 13px; }
+.join.invited button { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }

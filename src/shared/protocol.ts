@@ -45,6 +45,8 @@ export type ServerMsg =
   | { type: 'start'; t0: number; names: [string, string]; live: LiveInfo | null; commit: string }
   | { type: 'course'; obs: Obs[] }
   | { type: 'snap'; p: [PState, PState] }
+  /** The rival's key presses as they arrive, for drawing them smoothly. Display only. */
+  | { type: 'oin'; a: [number, Key][] }
   | ({ type: 'end' } & EndInfo)
   | { type: 'pong'; c: number; s: number }
   | { type: 'rematch_wait' }

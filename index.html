@@ -59,6 +59,7 @@
             <button class="btn primary" id="btn-quick">QUICK MATCH</button>
             <button class="btn" id="btn-create">CREATE ROOM</button>
           </div>
+          <p class="invite-note" id="invite-note" hidden>You're invited to a race. Pick your hamster's name, then press <b>JOIN</b>.</p>
           <form class="join" id="join-form">
             <input id="join-code" maxlength="60" autocomplete="off" spellcheck="false" placeholder="Room code or invite link" aria-label="Room code or invite link" />
             <button class="btn small" type="submit">JOIN</button>
@@ -224,17 +225,32 @@
       <div id="night-badge" hidden><i data-icon="hamster" data-size="28"></i> NIGHT RACE · Squeektoshi is running live</div>
       <div id="peer-banner" hidden>Your rival dropped out. Their hamster runs on without them. If it runs out of energy first, you win.</div>
       <div id="coach" hidden></div>
-      <div class="play-tools"><button class="btn small ghost" id="btn-mute">SOUND: ON</button><button class="btn small ghost" id="btn-leave">LEAVE</button></div>
-      <div id="touch" hidden>
-        <div class="pad-col">
-          <button class="pad lane" data-key="D" aria-label="Steer left">◀</button>
-          <button class="pad foot" data-key="L" aria-label="Left foot">F</button>
+      <div class="play-tools">
+        <button class="btn small ghost" id="btn-pause" title="Pause (Esc or P)" aria-label="Pause" hidden><span class="ic" aria-hidden="true">❚❚</span><span class="tx">PAUSE</span></button>
+        <button class="btn small ghost" id="btn-full" title="Full screen (F)" aria-label="Full screen" hidden><span class="ic" aria-hidden="true">⛶</span><span class="tx">FULL SCREEN</span></button>
+        <button class="btn small ghost" id="btn-mute" title="Sound (M)" aria-label="Sound"><span class="ic" aria-hidden="true">🔈</span><span class="tx">SOUND: ON</span></button>
+        <button class="btn small ghost" id="btn-leave" title="Leave (Esc)" aria-label="Leave"><span class="ic" aria-hidden="true">✕</span><span class="tx">LEAVE</span></button>
+      </div>
+
+      <div class="modal" id="pause" hidden>
+        <div class="panel">
+          <h2 id="pause-title">PAUSED</h2>
+          <p class="muted" id="pause-text">The wheel stops while you're away.</p>
+          <div class="row">
+            <button class="btn primary" id="btn-resume">RESUME</button>
+            <button class="btn ghost" id="btn-pause-leave">LEAVE</button>
+          </div>
+          <p class="muted small" id="pause-keys">Esc or P to resume · F full screen · M sound</p>
         </div>
-        <button class="pad act" data-key="J" aria-label="Jump">JUMP</button>
-        <div class="pad-col">
-          <button class="pad lane" data-key="U" aria-label="Steer right">▶</button>
-          <button class="pad foot" data-key="R" aria-label="Right foot">J</button>
+      </div>
+
+      <div class="modal" id="gl-lost" hidden>
+        <div class="panel">
+          <h2>The picture stopped</h2>
+          <p class="muted">Your graphics card reset. Reload the page to get the wheel back.</p>
+          <div class="row"><button class="btn primary" id="btn-reload">RELOAD</button></div>
         </div>
+      </div>
       </div>
 
       <div class="modal" id="reconnect" hidden>

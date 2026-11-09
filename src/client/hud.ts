@@ -118,8 +118,10 @@ class SideHud {
   /** The on-screen camera label, like the real stream's: CAM, a recording dot, the clock, IR at night. */
   camera(night: number, tick: number) {
     const ir = night > 0.5;
-    const t = 21 * 3600 + 14 * 60 + Math.floor(tick / 60);
-    const clock = `${String(Math.floor(t / 3600) % 24).padStart(2, '0')}:${String(Math.floor(t / 60) % 60).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+    void tick;
+    // The real local time, like a live camera's timestamp.
+    const d = new Date();
+    const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
     const text = `${this.mine ? 'CAM 1' : 'CAM 2'} ${ir ? 'IR' : 'DAY'} · ${clock}`;
     if (this.osdText.textContent !== text) this.osdText.textContent = text;
     this.osd.classList.toggle('ir', ir);

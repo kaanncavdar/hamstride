@@ -286,9 +286,11 @@ async function needRealWallet(): Promise<boolean> {
 function enterPlay() {
   screen = 'play';
   $('play').hidden = false;
+  $('pause').hidden = true;
+  fullBtn.hidden = !canFull;
+  keepAwake();
   document.body.style.overflow = 'hidden';
   moveCanvas($('stage'));
-  $('touch').hidden = true; // phones swipe instead
 }
 
 function goHome() {
@@ -300,6 +302,8 @@ function goHome() {
   practiceWhileWaiting = false;
   screen = 'landing';
   $('play').hidden = true;
+  $('pause').hidden = true;
+  letSleep();
   $('wait').hidden = true;
   $('result').hidden = true;
   $('stake').hidden = true;
@@ -487,14 +491,14 @@ function onServer(m: ServerMsg) {
     case 'snap':
       if (session.mode === 'online') session.onSnap(m.p);
       break;
+    case 'oin':
+      session.onOppInputs(m.a);
+      break;
     case 'peer':
       $('peer-banner').hidden = !m.away;
       break;
     case 'end':
-      if (session.mode === 'online') {
-        session.ended = true;
-        session.onSnap(m.final);
-      }
+      if (session.mode === 'online') session.finish(m.final);
       $('peer-banner').hidden = true;
       nextCommit = m.nextCommit;
       showOnlineResult(m);
@@ -583,6 +587,7 @@ function check(ok: boolean, text: string, detail = '') {
 }
 
 async function showOnlineResult(m: { type: 'end' } & EndInfo) {
+  $('pause').hidden = true;
   resultShown = true;
   coach.endRace();
   const meIdx = you;
@@ -634,13 +639,19 @@ async function showOnlineResult(m: { type: 'end' } & EndInfo) {
 }
 
 function showPracticeResult() {
+  $('pause').hidden = true;
   resultShown = true;
   coach.endRace();
+  // Freeze the race here, so the numbers on screen match the table instead of the bot running on.
+  session.pause();
   const me = session.me;
   const op = session.opp;
   const won = tiredAt(me) > tiredAt(op) || (!tired(me) && !tired(op) && winnerAtCap(me, op) === 0);
   $('res-title').textContent = won ? 'YOU OUTLASTED THE BOT!' : 'OUT OF ENERGY';
-  $('res-sub').textContent = practiceWhileWaiting ? "Still waiting for a rival. Go again, we'll pull you in when they arrive." : 'Practice race. Nothing is recorded.';
+  const how = won ? 'The bot ran out of energy first.' : `${session.names[1].replace(' (bot)', '')} kept running longer.`;
+  $('res-sub').textContent = practiceWhileWaiting
+    ? `${how} Still waiting for a rival: go again, we'll pull you in when they arrive.`
+    : `${how} Practice race, nothing is recorded.`;
   fillGrid(me, op, session.names);
   $('res-checks').textContent = '';
   const h = humanReport(me);
@@ -671,6 +682,9 @@ $('join-form').addEventListener('submit', (e) => {
   const raw = $<HTMLInputElement>('join-code').value.trim();
   const code = (/[?&]r=([a-z0-9]+)/i.exec(raw)?.[1] ?? raw).toLowerCase();
   if (!ROOM_CODE.test(code)) return heroError('That room code does not look right.');
+  save('wd.name', nameInput.value.trim());
+  $('invite-note').hidden = true;
+  $('join-form').classList.remove('invited');
   joinRoom(code, 'room');
 });
 $('btn-cancel').addEventListener('click', goHome);
@@ -699,7 +713,11 @@ $('btn-signout').addEventListener('click', async () => {
   paintWallet();
 });
 const muteBtn = $('btn-mute');
-const paintMute = () => (muteBtn.textContent = isMuted() ? 'SOUND: OFF' : 'SOUND: ON');
+const paintMute = () => {
+  muteBtn.querySelector('.tx')!.textContent = isMuted() ? 'SOUND: OFF' : 'SOUND: ON';
+  muteBtn.querySelector('.ic')!.textContent = isMuted() ? '🔇' : '🔈';
+  muteBtn.setAttribute('aria-pressed', String(isMuted()));
+};
 paintMute();
 muteBtn.addEventListener('click', () => {
   unlockAudio();
@@ -711,7 +729,93 @@ $('btn-tips').addEventListener('click', () => {
   coach = new Coach($('coach'));
   $('btn-tips').textContent = 'Tips will show in your next race ✓';
 });
-$('btn-leave').addEventListener('click', goHome);
+$('btn-leave').addEventListener('click', askLeave);
+
+// ---------- pause, full screen, leaving ----------
+/** A race this browser is in right now (not the menu's background race, not a finished one). */
+const racing = () => screen === 'play' && session.mode !== 'attract' && !resultShown && !session.ended;
+const raceOnline = () => racing() && session.mode === 'online' && !!conn;
+
+function openPause(kind: 'pause' | 'leave') {
+  const leaveOnline = kind === 'leave';
+  if (!leaveOnline) session.pause();
+  $('pause-title').textContent = leaveOnline ? 'Leave the race?' : 'PAUSED';
+  $('pause-text').textContent = leaveOnline
+    ? `Your hamster keeps running without you, and if it tires first your rival wins${roomStake ? ' the pot' : ''}.`
+    : 'The wheel stops while you\'re away.';
+  $('btn-resume').textContent = leaveOnline ? 'KEEP RACING' : 'RESUME';
+  $('pause-keys').hidden = leaveOnline || touchFirst;
+  $('pause').hidden = false;
+  $('btn-resume').focus();
+}
+function closePause() {
+  $('pause').hidden = true;
+  session.resume();
+}
+function askLeave() {
+  if (raceOnline()) openPause('leave');
+  else if (racing() && session.mode === 'practice') openPause('pause');
+  else goHome();
+}
+$('btn-pause').addEventListener('click', () => openPause('pause'));
+$('btn-resume').addEventListener('click', closePause);
+$('btn-pause-leave').addEventListener('click', () => {
+  $('pause').hidden = true;
+  goHome();
+});
+
+// Practice stops when you switch tabs or windows, so you never come back to a race that ran on without you.
+const autoPause = () => {
+  if (racing() && session.mode === 'practice' && !session.paused && session.countdownMs() < 0) openPause('pause');
+};
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) autoPause();
+  else if (screen === 'play') keepAwake();
+});
+window.addEventListener('blur', autoPause);
+
+// Full screen where the browser allows it (not on iPhone).
+const fullBtn = $('btn-full');
+const canFull = !!document.fullscreenEnabled;
+const paintFull = () => (fullBtn.querySelector('.tx')!.textContent = document.fullscreenElement ? 'EXIT FULL SCREEN' : 'FULL SCREEN');
+function toggleFull() {
+  if (!canFull) return;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+}
+fullBtn.addEventListener('click', toggleFull);
+document.addEventListener('fullscreenchange', paintFull);
+
+// Keep a phone's screen on during a race.
+let wake: { release(): Promise<void> } | null = null;
+async function keepAwake() {
+  try {
+    const nav = navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } };
+    if (!wake && nav.wakeLock) wake = await nav.wakeLock.request('screen');
+  } catch {
+    /* not allowed here: fine */
+  }
+}
+function letSleep() {
+  wake?.release().catch(() => {});
+  wake = null;
+}
+
+// Closing the tab mid-race forfeits it: ask first.
+window.addEventListener('beforeunload', (e) => {
+  if (raceOnline() || (roomStake > 0 && !$('stake').hidden)) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// If the graphics card resets, say so instead of showing a frozen picture.
+document.body.append($('gl-lost'));
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  $('gl-lost').hidden = false;
+});
+$('btn-reload').addEventListener('click', () => location.reload());
 $('btn-home').addEventListener('click', goHome);
 $('btn-wait-practice').addEventListener('click', startPractice);
 $('btn-copy').addEventListener('click', async () => {
@@ -756,6 +860,17 @@ function press(k: Key) {
 }
 window.addEventListener('keydown', (e) => {
   if (screen !== 'play') return;
+  if (!e.repeat && e.isTrusted && !(e.target as HTMLElement).closest?.('input, textarea')) {
+    if (e.code === 'Escape' || e.code === 'KeyP') {
+      if (!$('pause').hidden) closePause();
+      else if (e.code === 'Escape' || session.mode === 'practice') askLeave();
+      e.preventDefault();
+      return;
+    }
+    if (e.code === 'KeyF') return toggleFull();
+    if (e.code === 'KeyM') return muteBtn.click();
+  }
+  if (!$('pause').hidden) return;
   const k = KEYMAP[e.code];
   if (!k) return;
   e.preventDefault();
@@ -816,10 +931,32 @@ function playEvents(me: PState, op: PState) {
 }
 
 // ---------- main loop ----------
+// Automatic quality: if frames keep coming slower than ~50 a second (a weaker GPU, or two game
+// windows at once), render at a lower resolution. It only steps down, so it never flickers.
+const perf = { last: 0, ema: 16.7, scale: 1, changedAt: 0 };
+function watchFrameRate(now: number) {
+  const dt = now - perf.last;
+  perf.last = now;
+  if (dt <= 0 || dt > 250 || document.hidden) return; // a tab switch, not a slow frame
+  perf.ema = perf.ema * 0.95 + dt * 0.05;
+  if (perf.ema > 20.5 && perf.scale > 0.55 && now - perf.changedAt > 2000) {
+    perf.scale = Math.max(0.55, +(perf.scale - 0.15).toFixed(2));
+    perf.changedAt = now;
+    perf.ema = 16.7;
+    (arena as { setQuality?: (s: number) => void }).setQuality?.(perf.scale);
+  }
+}
+
+const touchFirst = matchMedia('(pointer: coarse)').matches;
+const HOW_TO = touchFirst
+  ? 'swipe ← → to change lane · ↑ to jump · ↓ to slide · every bump costs ⚡'
+  : '← → change lane · ↑ jump · ↓ slide · every bump costs ⚡';
+
 function frame(now: number) {
   requestAnimationFrame(frame);
   const t = now / 1000;
   if (screen === 'landing' && !heroVisible) return;
+  watchFrameRate(now);
   session.update();
 
   if (session.mode === 'attract') {
@@ -846,19 +983,23 @@ function frame(now: number) {
     { state: opp, course: session.course, live: isLive, ghost: session.me, ghostName: session.names[0], ticker: WIDE ? tickerText() : undefined },
     t,
   );
+  // Drawing uses the smooth forward-run rival; sounds and the HUD use the server-confirmed one, so a
+  // guess about the last few milliseconds never shows a bump or a finish that didn't happen.
+  const oppSure = session.mode === 'online' ? session.opp : opp;
   if (screen === 'play' && session.mode !== 'attract') {
-    playEvents(session.me, opp);
+    playEvents(session.me, oppSure);
     coach.update(session.me, session.course, session.countdownMs());
   }
 
   if (screen === 'play') {
-    hud.update(session.names, session.me, session.oppView(), arena.nights());
+    $('btn-pause').hidden = !(session.mode === 'practice' && racing());
+    hud.update(session.names, session.me, oppSure, arena.nights());
     const cd = session.countdownMs();
     const cdEl = $('countdown');
     if (cd > 0) {
       cdEl.hidden = false;
       const n = Math.ceil(cd / 1000);
-      cdEl.innerHTML = n > 3 ? '<div>READY<small>← → change lane · ↑ jump · ↓ slide · every bump costs ⚡</small></div>' : `<div>${n}</div>`;
+      cdEl.innerHTML = n > 3 ? `<div>READY<small>${HOW_TO}</small></div>` : `<div>${n}</div>`;
     } else if (cd > -700) {
       cdEl.hidden = false;
       cdEl.innerHTML = '<div>GO!</div>';
@@ -1202,8 +1343,16 @@ async function boot() {
   setInterval(refreshChallenges, 15_000);
   setInterval(refreshTotals, 120_000);
   // Invite links: /?r=code
-  const invite = new URLSearchParams(location.search).get('r');
-  if (invite && ROOM_CODE.test(invite)) joinRoom(invite, 'room');
+  // Invite links (/?r=code) fill in the JOIN box, so the friend can pick a name (and connect a wallet)
+  // before the race, instead of joining as "Hamster".
+  const invite = new URLSearchParams(location.search).get('r')?.toLowerCase();
+  if (invite && ROOM_CODE.test(invite)) {
+    $<HTMLInputElement>('join-code').value = invite;
+    $('invite-note').hidden = false;
+    $('join-form').classList.add('invited');
+    nameInput.focus();
+    nameInput.select();
+  }
 }
 boot();
 

@@ -268,6 +268,7 @@ export class Room extends DurableObject<Env> {
     const now = this.nowTick();
     // Nothing counts before GO: otherwise countdown taps would all land on tick 0.
     if (now < 0) return;
+    const relay: [number, Key][] = [];
     for (const item of a.slice(0, 30)) {
       if (!Array.isArray(item)) continue;
       let [t, k] = item as [number, Key];
@@ -288,7 +289,12 @@ export class Room extends DurableObject<Env> {
         q.push([t, k]);
         q.sort((x, y) => x[0] - y[0]);
       }
+      relay.push([t, k]);
     }
+    // Pass the presses straight on so the rival's screen can draw this hamster smoothly, without
+    // waiting for the confirmed snapshot. Display only: the result still comes from the server's replay.
+    const other = this.players[this.players[0] === p ? 1 : 0];
+    if (relay.length && other?.ws) this.send(other.ws, { type: 'oin', a: relay });
   }
 
   private maybeStart() {
