@@ -234,10 +234,31 @@ async function openWallets() {
   }
 }
 
+let signingIn = false;
 async function connectWith(w: WalletInfo) {
-  $('wallet-status').textContent = 'Check your wallet: approve the connection, switch to Sepolia, then sign the message.';
+  // One sign-in at a time: a second click would only queue a second request in the wallet.
+  if (signingIn) return;
+  signingIn = true;
+  const buttons = [...$('wallet-list').querySelectorAll('button')] as HTMLButtonElement[];
+  buttons.forEach((b) => (b.disabled = true));
+  const status = $('wallet-status');
+  let line = `Opening ${w.name}…`;
+  status.textContent = line;
+  // If the wallet's window doesn't show up (it can open behind this one), say where to find it.
+  const hint = setTimeout(() => (status.textContent = `${line} No window? Click the ${w.name} icon in your browser's toolbar: the request is waiting there.`), 6000);
+  const show = (l: string) => {
+    line = l;
+    status.textContent = l;
+  };
   try {
-    account = await signIn(w);
+    try {
+      account = await signIn(w, show);
+    } catch (e) {
+      // A wallet that was still switching networks can reject the signature request once: try again,
+      // unless the player said no.
+      if ((e as { code?: number }).code === 4001) throw e;
+      account = await signIn(w, show);
+    }
     activeWallet = w;
     w.provider.on?.('accountsChanged', onAccountsChanged);
     $('wallets').hidden = true;
@@ -246,7 +267,12 @@ async function connectWith(w: WalletInfo) {
     refreshMySqk();
   } catch (e) {
     const code = (e as { code?: number }).code;
-    $('wallet-status').textContent = code === 4001 ? 'You cancelled in the wallet. Nothing was signed.' : e instanceof Error ? e.message : 'Sign-in failed.';
+    const msg = (e as { message?: string })?.message;
+    status.textContent = code === 4001 ? 'You cancelled in the wallet. Nothing was signed.' : `Sign-in did not finish: ${(msg ?? 'unknown error').replace(/\.$/, '')}. Try again.`;
+  } finally {
+    clearTimeout(hint);
+    signingIn = false;
+    buttons.forEach((b) => (b.disabled = false));
   }
 }
 
@@ -992,6 +1018,9 @@ function frame(now: number) {
   }
 
   if (screen === 'play') {
+    // While waiting for a rival or for both stakes, the wheel behind is only the menu's demo race:
+    // don't label its hamsters as you and your rival.
+    $('hud').hidden = session.mode === 'attract';
     $('btn-pause').hidden = !(session.mode === 'practice' && racing());
     hud.update(session.names, session.me, oppSure, arena.nights());
     const cd = session.countdownMs();
@@ -1371,6 +1400,19 @@ if (import.meta.env.DEV) {
       session = Session.practice('attract', 0.7, live);
     },
     practice: startPractice,
+    /** A practice race against a bot of the given skill (for recording clips). */
+    race(botSkill = 0.9) {
+      enterPlay();
+      startPractice();
+      session = Session.practice('practice', botSkill, live);
+    },
+    /** One bot decision for your hamster, applied now: call once per frame when driving the clock by hand. */
+    botStep(skill = 0.9) {
+      const b = new Bot(randomHex(16), skill);
+      return () => {
+        for (const k of b.keys(session.me, session.course)) press(k);
+      };
+    },
     /** Lets a bot press your keys, to watch effects and tips without typing. */
     autoplay(skill = 0.7) {
       const b = new Bot(randomHex(16), skill);

@@ -99,7 +99,7 @@
               </div>
             </div>
             <dl class="stats">
-              <div class="stat big"><dt>RAN TODAY</dt><dd id="live-km">–</dd></div>
+              <div class="stat big"><dt>RAN TODAY <small>(UTC)</small></dt><dd id="live-km">–</dd></div>
               <div class="stat big"><dt>RAN IN TOTAL</dt><dd id="live-total">–</dd><small id="live-since"></small></div>
               <div class="stat"><dt>SPEED NOW</dt><dd id="live-speed">–</dd></div>
               <div class="stat"><dt>WHEEL RPM</dt><dd id="live-rpm">–</dd></div>
@@ -177,22 +177,6 @@
           </div>
         </section>
 
-        <section class="section" id="more">
-          <h2 class="h2">More games for Squeektoshi</h2>
-          <p class="muted center">Built by other Squeekchain community builders, all on the Genesis board. Play one while you wait.</p>
-          <div class="cards more">
-            <a class="card link" href="https://hamster-rush-squeekchain.imd.site/" target="_blank" rel="noopener noreferrer"><h3>Hamster Rush ↗</h3><p>Runs tied to your wallet on a public leaderboard.</p></a>
-            <a class="card link" href="https://squeekroyale.fun/" target="_blank" rel="noopener noreferrer"><h3>Squeek Royale ↗</h3><p>A battle royale for hamster NFTs.</p></a>
-            <a class="card link" href="https://squeekout.fun/" target="_blank" rel="noopener noreferrer"><h3>Squeek Out ↗</h3><p>Ride the wheel and jump off before he stops.</p></a>
-            <a class="card link" href="https://squeaksy.xyz/" target="_blank" rel="noopener noreferrer"><h3>Squeaksy ↗</h3><p>A pixel idle wheel game.</p></a>
-            <a class="card link" href="https://hamster-tower.imd.site/" target="_blank" rel="noopener noreferrer"><h3>Hamster Tower ↗</h3><p>Each round of real work adds a floor.</p></a>
-            <a class="card link" href="https://squeekcity.space/" target="_blank" rel="noopener noreferrer"><h3>Squeek City ↗</h3><p>An open-world city where you play as a hamster.</p></a>
-            <a class="card link" href="https://squeekwars.online/" target="_blank" rel="noopener noreferrer"><h3>Squeek Wars ↗</h3><p>Hamster village strategy on Sepolia.</p></a>
-            <a class="card link" href="https://turingwheel.imd.site/" target="_blank" rel="noopener noreferrer"><h3>Turing Wheel ↗</h3><p>A tiny computer clocked by the wheel.</p></a>
-          </div>
-          <p class="center"><a href="https://squeekchain.com/genesis/code" target="_blank" rel="noopener noreferrer">All community builds ↗</a></p>
-        </section>
-
         <footer class="foot">
           <div class="foot-brand"><span class="brand-dots" data-dots="HAM" data-top="#f7b45a" data-bottom="#d9772b"></span><span class="brand-dots" data-dots="STRIDE" data-top="#8f9cff" data-bottom="#4a5bd6"></span></div>
           <p>An independent community game for <a href="https://squeekchain.com" target="_blank" rel="noopener noreferrer">Squeekchain</a>, the blockchain powered by a hamster. Not made by the Squeekchain team.</p>
@@ -213,7 +197,7 @@
         <h2>Connect a wallet</h2>
         <p class="muted small">Pick the wallet installed in this browser.</p>
         <div class="wallet-list" id="wallet-list"></div>
-        <p class="muted small" id="wallet-status"></p>
+        <p class="wallet-status" id="wallet-status" role="status" aria-live="polite"></p>
         <button class="btn small" id="btn-wallets-close">CLOSE</button>
       </div>
     </div>
@@ -269,7 +253,7 @@
           </div>
           <p class="timer" id="wait-timer">0:00</p>
           <div id="wait-ideas" hidden>
-            <p>Still waiting? Warm up against a bot, and if someone joins we'll pull you straight into the race. Or try <a href="https://hamster-rush-squeekchain.imd.site/" target="_blank" rel="noopener noreferrer">Hamster Rush</a> or <a href="https://squeekout.fun/" target="_blank" rel="noopener noreferrer">Squeek Out</a> in a new tab.</p>
+            <p>Still waiting? Warm up against a bot, and if someone joins we'll pull you straight into the race.</p>
             <button class="btn" id="btn-wait-practice">PRACTICE WHILE I WAIT</button>
           </div>
           <button class="btn ghost small" id="btn-cancel">CANCEL</button>

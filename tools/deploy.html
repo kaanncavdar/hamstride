@@ -15,7 +15,7 @@
       button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; }
       button.primary { background: #23202e; color: #fff; }
       .ok { color: #2f9e5a; } .bad { color: #e5484d; }
-      #log p { margin: 4px 0; }
+      #log p, #test-log p { margin: 4px 0; }
     </style>
   </head>
   <body>
@@ -30,6 +30,16 @@
     </div>
     <p><button id="connect">1. CONNECT WALLET</button> <button class="primary" id="deploy" disabled>2. DEPLOY</button></p>
     <div id="log"></div>
+
+    <h2 style="font-size:17px;margin-top:36px">Test mode: races for test SQK</h2>
+    <p>For trying races for SQK before you hold real SQK. This creates a worthless test token (<b>Hamstride Test SQK</b>, tSQK) and a second escrow that uses it, both owned by your wallet. The real escrow is not touched. Only the local site is switched to the test pair.</p>
+    <p><button id="test-deploy" disabled>A. DEPLOY TEST TOKEN + TEST ESCROW</button></p>
+    <div class="box">
+      <div class="row"><span>Test token</span><input id="test-token" placeholder="0x… (filled in after step A)" size="44" style="font:inherit" /></div>
+      <p style="margin:8px 0 0">In each wallet you want to race with (connect it above first):</p>
+      <p><button id="drip" disabled>B. GET 1000 TEST SQK</button></p>
+    </div>
+    <div id="test-log"></div>
     <script type="module" src="./deploy.ts"></script>
   </body>
 </html>

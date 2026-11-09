@@ -87,12 +87,25 @@ export async function signOut() {
 }
 
 /** Connect → Sepolia → sign a plain-text sign-in message → server checks it and sets a session. */
-export async function signIn(w: WalletInfo): Promise<string> {
+/**
+ * Sign-In with Ethereum. The wallet asks at most twice: once to connect this site (only the first
+ * time) and once to sign a free message. `step` gets a line to show for each, so the player knows
+ * why the wallet opened again.
+ */
+export async function signIn(w: WalletInfo, step: (s: string) => void = () => {}): Promise<string> {
   const p = w.provider;
+  const known = ((await p.request({ method: 'eth_accounts' }).catch(() => [])) as string[]) ?? [];
+  if (!known.length) step(`Step 1 of 2: in ${w.name}, allow this site to see your address.`);
   const accounts = (await p.request({ method: 'eth_requestAccounts' })) as string[];
   if (!accounts?.length) throw new Error('The wallet did not share an account.');
   const address = getAddress(accounts[0]);
-  await ensureSepolia(p);
+  const id = String(await p.request({ method: 'eth_chainId' })).toLowerCase();
+  if (id !== SEPOLIA.chainId) {
+    step(`In ${w.name}, switch to the Sepolia test network.`);
+    await ensureSepolia(p);
+    // Some wallets drop the next request while they finish switching networks.
+    await new Promise((r) => setTimeout(r, 600));
+  }
   const nr = await fetch('/api/auth/nonce', { cache: 'no-store' });
   if (!nr.ok) throw new Error('Could not start sign-in.');
   const { nonce, chainId } = (await nr.json()) as { nonce: string; chainId: number };
@@ -108,6 +121,7 @@ export async function signIn(w: WalletInfo): Promise<string> {
     issuedAt: now,
     expirationTime: new Date(now.getTime() + 10 * 60_000),
   });
+  step(`${known.length ? 'Last step' : 'Step 2 of 2'}: in ${w.name}, sign the message. It is free: no transaction, no gas.`);
   const signature = (await p.request({ method: 'personal_sign', params: [toHex(message), address] })) as string;
   const vr = await fetch('/api/auth/verify', {
     method: 'POST',
