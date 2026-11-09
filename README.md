@@ -82,3 +82,7 @@ After deploying:
 
 - Squeek NFT skins read from `tokenURI`.
 - More of the real enclosure from the stream: the clear upright wheel, pampas grass, the ceramic mushroom hide and the stream's ROUND / RUNNING / BLOCK cards.
+
+## Squeekchain Genesis
+
+squeekchain-project: f67fef53-2fe5-4458-b024-5557cf968643
