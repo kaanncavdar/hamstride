@@ -28,7 +28,7 @@ export interface Obs {
 
 export const LEN: Record<ObsKind, number> = { block: 2.4, low: 0.6, high: 0.8, car: 2.2, worm: 0.6, wheel: 0.9, ball: 0.9, bdrop: 0.9 };
 /** The course is long enough for the longest possible race (3 minutes at top speed). */
-export const COURSE_M = 3800;
+export const COURSE_M = 20000;
 /** Cars start driving at you once you're this close. */
 export const CAR_WAKE = 45;
 const CAR_CLOSE = 0.6;

@@ -1,0 +1,14 @@
+{
+  "name": "squeek-sprint-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "hardhat build",
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "5.6.1",
+    "forge-std": "github:foundry-rs/forge-std#v1.9.7",
+    "hardhat": "3.21.2"
+  }
+}

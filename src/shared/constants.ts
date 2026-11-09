@@ -2,7 +2,8 @@
 export const TICK_HZ = 60;
 export const DT = 1 / TICK_HZ;
 /** Hard stop: 3 minutes. If both are still running, the one further ahead wins. */
-export const MAX_TICKS = TICK_HZ * 180;
+/** Safety cap only: speed never stops rising and stamina drains, so real races end well before. */
+export const MAX_TICKS = TICK_HZ * 600;
 export const COUNTDOWN_MS = 3500;
 /** The server confirms a player's run this many ticks behind real time (400 ms) to absorb latency. */
 export const CONFIRM_LAG_TICKS = 24;

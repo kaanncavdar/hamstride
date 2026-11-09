@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "wheel-duel",
+  "name": "hamstride",
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
@@ -18,12 +18,21 @@
   },
   // SQLite-backed Durable Objects are available on the Workers free plan.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "Lobby", "Board"] }],
-  // The game is served on this subdomain. Cloudflare creates the DNS record on deploy.
-  "routes": [{ "pattern": "sprint.kaancavdar.com", "custom_domain": true }],
-  "workers_dev": true,
+  // The game is served on hamstride.xyz. Cloudflare creates the DNS records on deploy.
+  "routes": [
+    { "pattern": "hamstride.xyz", "custom_domain": true },
+    { "pattern": "www.hamstride.xyz", "custom_domain": true }
+  ],
+  // Only the real domain: no second public copy on workers.dev.
+  "workers_dev": false,
   // Local dev: keep requests on localhost instead of rewriting them to the production subdomain.
   "dev": { "host": "localhost:5173" },
-  // .dev.vars overrides these locally.
-  "vars": { "TICKET_BITS": "14", "ALLOWED_ORIGINS": "https://sprint.kaancavdar.com" },
+  // .dev.vars overrides these locally. Secrets (TICKET_SECRET, REFEREE_KEY) are set with
+  // `wrangler secret put`, never here. The escrow address is public.
+  "vars": {
+    "TICKET_BITS": "14",
+    "ALLOWED_ORIGINS": "https://hamstride.xyz,https://www.hamstride.xyz",
+    "ESCROW_ADDRESS": "0x6a9E96118935ECdc30c790562CDF4b7288Bf708a"
+  },
   "observability": { "enabled": true }
 }

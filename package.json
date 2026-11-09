@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "deploy": "npm run build && wrangler deploy",
-    "dev:wide": "VITE_VARIANT=wide vite --port 5174 --strictPort"
+    "dev:classic": "VITE_VARIANT=classic vite --port 5174 --strictPort"
   },
   "dependencies": {
     "three": "^0.170.0",

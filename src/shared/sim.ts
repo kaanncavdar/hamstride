@@ -48,6 +48,8 @@ export const CLASSIC: Rules = { speed: baseSpeed, snacksPerBolt: SNACKS_PER_BOLT
  * back. Even a very good run ends within a few minutes; the snacks you grab decide who lasts longer.
  */
 export const RAMP: Rules = { speed: (tick) => 8 + (0.07 * tick) / 60, snacksPerBolt: 14, drain: { start: 90 * 60, every: 12 * 60 } };
+/** The rules of the real game, online and offline. CLASSIC is kept only for the old 45° version. */
+export const GAME_RULES = RAMP;
 
 /** One player's run. Plain numbers only, so it round-trips through JSON unchanged. */
 export interface PState {
@@ -161,7 +163,7 @@ function tallBeside(course: readonly Obs[], lane: number, dist: number): boolean
 }
 
 /** Advances one player one tick (1/60 s). Pure arithmetic, so every engine agrees. */
-export function step(s: PState, keys: readonly Key[], course: readonly Obs[], rules: Rules = CLASSIC): void {
+export function step(s: PState, keys: readonly Key[], course: readonly Obs[], rules: Rules = GAME_RULES): void {
   if (s.tiredTick >= 0) {
     s.tick++;
     return;

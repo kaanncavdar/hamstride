@@ -9,7 +9,9 @@ import { readLive, readTotals } from './live';
 import { hydrateDotText, hydrateSprites } from './pixel';
 import { sfx, unlockAudio, isMuted, setMuted } from './sfx';
 import { Coach } from './coach';
-import { listWallets, me as whoAmI, short, signIn, signOut, type WalletInfo } from './wallet';
+import { listWallets, me as whoAmI, short, signIn, signOut, type Eip1193, type WalletInfo } from './wallet';
+import { claim, depositStake, readMatch, refundBoth, takeBack, txLink } from './stake';
+import { isStakeAmount, ONE_SQK, payout, STATUS, TIERS, type ResultJson, type TicketJson } from '../shared/escrow';
 import { courseHash, generateCourse } from '../shared/course';
 import { randomHex, sha256Hex } from '../shared/hash';
 import { tired, tiredAt, winnerAtCap, type Key, type PState } from '../shared/sim';
@@ -241,6 +243,7 @@ async function connectWith(w: WalletInfo) {
     $('wallets').hidden = true;
     paintWallet();
     heroError('');
+    refreshMySqk();
   } catch (e) {
     const code = (e as { code?: number }).code;
     $('wallet-status').textContent = code === 4001 ? 'You cancelled in the wallet. Nothing was signed.' : e instanceof Error ? e.message : 'Sign-in failed.';
@@ -265,6 +268,19 @@ async function needWallet(): Promise<boolean> {
   return false;
 }
 const guestQuery = () => (!account && guestsAllowed ? `g=${pid}` : '');
+const joinQuery = (extra: string) => [guestQuery(), extra].filter(Boolean).join('&');
+
+/** Races for SQK need a real signed-in wallet (no guests), even in development. */
+async function needRealWallet(): Promise<boolean> {
+  if (!stakeEnabled) {
+    heroError('Races for SQK are not switched on yet.');
+    return false;
+  }
+  if (account) return true;
+  heroError('Connect your wallet to race for SQK.');
+  openWallets();
+  return false;
+}
 
 // ---------- screens ----------
 function enterPlay() {
@@ -286,6 +302,8 @@ function goHome() {
   $('play').hidden = true;
   $('wait').hidden = true;
   $('result').hidden = true;
+  $('stake').hidden = true;
+  stakeTimerStop();
   $('countdown').hidden = true;
   $('night-badge').hidden = true;
   document.body.style.overflow = '';
@@ -295,6 +313,8 @@ function goHome() {
   arena.resetCourse();
   hud.reset();
   refreshBoard();
+  refreshChallenges();
+  refreshMySqk();
 }
 
 function showWait(kind: 'queue' | 'room', code = '') {
@@ -331,13 +351,14 @@ function failOnline(msg: string) {
 }
 
 // ---------- online ----------
-async function quickMatch() {
+async function quickMatch(stake = 0) {
   heroError('');
-  if (!(await needWallet())) return;
+  if (stake ? !(await needRealWallet()) : !(await needWallet())) return;
   enterPlay();
   showWait('queue');
+  if (stake) $('wait-title').textContent = `Finding a rival at the ${stake} SQK table…`;
   try {
-    lobby = await Conn.open('/ws/lobby', guestQuery());
+    lobby = await Conn.open('/ws/lobby', joinQuery(stake ? `stake=${stake}` : ''));
   } catch (e) {
     return failOnline(e instanceof Error ? e.message : 'Could not reach the server.');
   }
@@ -345,7 +366,7 @@ async function quickMatch() {
     if (m.type === 'matched') {
       lobby?.close();
       lobby = null;
-      joinRoom(m.code, 'queue');
+      joinRoom(m.code, 'queue', m.stake);
     }
   });
   lobby.onClose(() => {
@@ -364,9 +385,9 @@ function newRoomCode() {
 
 let reconnecting = false;
 
-async function joinRoom(code: string, kind: 'queue' | 'room' | 'resume') {
+async function joinRoom(code: string, kind: 'queue' | 'room' | 'resume', stake = 0, listed = false) {
   heroError('');
-  if (kind !== 'resume' && !(await needWallet())) return;
+  if (kind !== 'resume' && !(stake ? await needRealWallet() : await needWallet())) return;
   if (screen !== 'play') enterPlay();
   roomCode = code;
   if (kind === 'room') {
@@ -374,7 +395,7 @@ async function joinRoom(code: string, kind: 'queue' | 'room' | 'resume') {
     showWait('room', code);
   }
   try {
-    conn = await Conn.open(`/ws/room/${code}`, guestQuery());
+    conn = await Conn.open(`/ws/room/${code}`, joinQuery(stake ? `stake=${stake}${listed ? '&pub=1' : ''}` : ''));
   } catch (e) {
     if (kind === 'resume') throw e;
     return failOnline(e instanceof Error ? e.message : 'Could not reach the server.');
@@ -420,14 +441,24 @@ function onServer(m: ServerMsg) {
     case 'welcome':
       you = m.you;
       nextCommit = m.commit;
+      roomStake = m.stake ?? 0;
+      if (roomStake && waitKind === 'room') {
+        $('wait-title').textContent = `Race for ${roomStake} SQK`;
+        $('wait-sub').textContent = `You each put in ${roomStake} SQK once your rival is here. The winner gets ${fmtSqk(payout(BigInt(roomStake) * ONE_SQK))} SQK.`;
+      }
       if (!m.resumed) sendHello();
       break;
     case 'roster': {
       const other = m.names[you === 0 ? 1 : 0];
+      if (other) rivalName = other;
       if (waitKind === 'room' && other) $('wait-sub').textContent = `${other} is here. Starting…`;
       break;
     }
     case 'start': {
+      $('stake').hidden = true;
+      stakeTimerStop();
+      lastPayout = null;
+      $('res-payout').hidden = true;
       const resumed = session.mode === 'online' && !session.ended && commitAtStart === m.commit;
       commitAtStart = m.commit;
       liveAtStart = m.live;
@@ -474,6 +505,19 @@ function onServer(m: ServerMsg) {
     case 'left':
       rivalLeft = true;
       if (resultShown) $('res-wait').textContent = 'Your rival left. Press rematch to wait for a new one in this room.';
+      break;
+    case 'stake':
+      showStake(m);
+      break;
+    case 'stake_status':
+      paintStakeStatus(m.paid);
+      break;
+    case 'stake_failed':
+      onStakeFailed(m.matchId, m.paid);
+      break;
+    case 'payout':
+      lastPayout = m;
+      paintPayout();
       break;
     case 'error':
       failOnline(m.msg);
@@ -553,13 +597,15 @@ async function showOnlineResult(m: { type: 'end' } & EndInfo) {
         : "You left and your hamster ran out of energy before you came back."
       : m.reason === 'timeout'
         ? won
-          ? 'Three minutes and you both kept going. You had more energy left (or got further).'
+          ? 'Ten minutes and you both kept going. You had more energy left (or got further).'
           : m.winner === -1
-            ? 'Three minutes, both still running, exactly level.'
-            : 'Three minutes and you both kept going. Your rival had more energy left (or got further).'
+            ? 'Ten minutes, both still running, exactly level.'
+            : 'Ten minutes and you both kept going. Your rival had more energy left (or got further).'
         : m.reason === 'abandoned'
           ? 'Both players left, so it is a draw.'
-          : won
+          : m.winner === -1
+            ? 'You both ran out of energy at the very same moment, so it is a draw.'
+            : won
             ? 'Your rival got too tired and stopped to rest first.'
             : 'Your hamster got too tired and stopped to rest first. Rematch and get them back.';
   fillGrid(me, op, session.names);
@@ -606,6 +652,15 @@ function showPracticeResult() {
 
 // ---------- buttons ----------
 $('btn-quick').addEventListener('click', () => quickMatch());
+$('btn-stake-room').addEventListener('click', () => {
+  const n = Number($<HTMLInputElement>('stake-amount').value);
+  if (!isStakeAmount(n)) return heroError('Pick a whole number of SQK between 1 and 100000.');
+  joinRoom(newRoomCode(), 'room', n, $<HTMLInputElement>('stake-public').checked);
+});
+$('btn-deposit').addEventListener('click', doDeposit);
+$('btn-stake-back').addEventListener('click', doTakeBack);
+$('btn-stake-leave').addEventListener('click', goHome);
+$('btn-claim').addEventListener('click', doClaim);
 $('btn-create').addEventListener('click', () => joinRoom(newRoomCode(), 'room'));
 $('btn-practice').addEventListener('click', () => {
   enterPlay();
@@ -817,6 +872,307 @@ requestAnimationFrame(frame);
 for (const ev of ['pointerdown', 'keydown'] as const) window.addEventListener(ev, () => unlockAudio(), { once: true, capture: true });
 
 // ---------- boot: a short loading bar, then the game menu ----------
+// ---------- races for SQK ----------
+let stakeEnabled = false;
+let roomStake = 0;
+let stakeMsg: { ticket: TicketJson; sig: `0x${string}`; escrow: `0x${string}`; token: `0x${string}` } | null = null;
+let stakeTimer: ReturnType<typeof setInterval> | null = null;
+let lastPayout: { result: ResultJson; sig: `0x${string}`; escrow: `0x${string}`; stake: string } | null = null;
+let failedMatch: { matchId: `0x${string}`; escrow: `0x${string}`; deadline: number } | null = null;
+let myPaid = false;
+let rivalName = '';
+
+const fmtSqk = (wei: bigint) => {
+  const whole = wei / ONE_SQK;
+  const frac = ((wei % ONE_SQK) * 100n) / ONE_SQK;
+  return frac ? `${whole}.${String(frac).padStart(2, '0').replace(/0$/, '')}` : String(whole);
+};
+
+/** The wallet that holds the signed-in account (finds it again after a page reload). */
+async function walletProvider(): Promise<Eip1193> {
+  if (activeWallet) return activeWallet.provider;
+  const list = await listWallets();
+  for (const w of list) {
+    const accs = (await w.provider.request({ method: 'eth_accounts' }).catch(() => [])) as string[];
+    if (account && accs.some((a) => a.toLowerCase() === account!.toLowerCase())) {
+      activeWallet = w;
+      return w.provider;
+    }
+  }
+  if (list[0]) return list[0].provider;
+  throw new Error('No browser wallet found.');
+}
+
+async function refreshStakeConfig() {
+  const r = await fetch('/api/stake/config', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+  stakeEnabled = !!r?.enabled;
+  $('sqk-off').hidden = stakeEnabled;
+  $('tiers').hidden = !stakeEnabled;
+  ($('sqk-box').querySelector('details') as HTMLElement).hidden = !stakeEnabled;
+  const tiers = $('tiers');
+  tiers.textContent = '';
+  for (const t of TIERS) {
+    const b = document.createElement('button');
+    b.className = 'btn small tier';
+    b.textContent = `${t} SQK`;
+    b.addEventListener('click', () => quickMatch(t));
+    tiers.append(b);
+  }
+  if (stakeEnabled) {
+    refreshChallenges();
+    refreshMySqk();
+  }
+}
+
+async function refreshChallenges() {
+  if (!stakeEnabled || screen !== 'landing') return;
+  const r = await fetch('/api/challenges', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+  const box = $('challenges');
+  box.textContent = '';
+  const rows = (r?.rows ?? []) as { code: string; stake: number; name: string; wallet: string }[];
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.className = 'muted small';
+    p.textContent = 'No open challenges right now. Create one above.';
+    box.append(p);
+    return;
+  }
+  for (const c of rows) {
+    const row = document.createElement('div');
+    row.className = 'challenge';
+    const who = document.createElement('span');
+    who.textContent = `${c.name} (${c.wallet})`;
+    const amt = document.createElement('b');
+    amt.textContent = `${c.stake} SQK`;
+    const go = document.createElement('button');
+    go.className = 'btn small';
+    go.textContent = 'ACCEPT';
+    go.addEventListener('click', () => joinRoom(c.code, 'room'));
+    row.append(who, amt, go);
+    box.append(row);
+  }
+}
+
+/** Your unfinished races for SQK: wins to claim, draws to settle, stakes to take back. */
+async function refreshMySqk() {
+  const box = $('my-sqk');
+  box.hidden = true;
+  if (!stakeEnabled || !account) return;
+  const r = await fetch('/api/stakes', { cache: 'no-store' }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+  const cfg = await fetch('/api/stake/config', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+  if (!r?.rows?.length || !cfg?.escrow) return;
+  let p: Eip1193 | null = null;
+  try {
+    p = await walletProvider();
+  } catch {
+    return;
+  }
+  box.textContent = '';
+  const now = Math.floor(Date.now() / 1000);
+  const me = account.toLowerCase();
+  let n = 0;
+  for (const row of r.rows as { matchId: `0x${string}`; a: string; b: string; stake: string; deadline: number; state: string; result: ResultJson | null; sig: `0x${string}` | null }[]) {
+    const chain = await readMatch(p, cfg.escrow, row.matchId).catch(() => null);
+    if (!chain || chain.status === STATUS.Settled || chain.status === STATUS.Refunded || chain.status === STATUS.None) continue;
+    const iAmA = row.a === me;
+    const stake = fmtSqk(BigInt(row.stake));
+    let label = '';
+    let act: (() => Promise<`0x${string}`>) | null = null;
+    if (chain.status === STATUS.Active && row.result && row.sig) {
+      const mine = row.result.outcome === 3 || row.result.outcome === (iAmA ? 1 : 2);
+      if (!mine) continue;
+      label = row.result.outcome === 3 ? `Draw: take your ${stake} SQK back` : `You won ${fmtSqk(payout(BigInt(row.stake)))} SQK`;
+      const res = row.result;
+      const sig = row.sig;
+      act = () => claim(p!, cfg.escrow, res, sig);
+    } else if (chain.status === STATUS.Open && (iAmA ? chain.paidA : chain.paidB) && now > Number(chain.joinDeadline)) {
+      label = `Race never started: take your ${stake} SQK back`;
+      act = () => takeBack(p!, cfg.escrow, row.matchId);
+    } else if (chain.status === STATUS.Active && now > Number(chain.settleDeadline)) {
+      label = `No result: refund both ${stake} SQK stakes`;
+      act = () => refundBoth(p!, cfg.escrow, row.matchId);
+    }
+    if (!act) continue;
+    const line = document.createElement('div');
+    line.className = 'challenge';
+    const t = document.createElement('span');
+    t.textContent = label;
+    const b = document.createElement('button');
+    b.className = 'btn small primary';
+    b.textContent = 'DO IT';
+    const run = act;
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      t.textContent = 'Confirm in your wallet…';
+      try {
+        await run();
+        t.textContent = 'Done ✓';
+      } catch (e) {
+        t.textContent = e instanceof Error ? e.message : 'Failed.';
+        b.disabled = false;
+      }
+    });
+    line.append(t, b);
+    box.append(line);
+    n++;
+  }
+  box.hidden = n === 0;
+}
+
+function stakeTimerStop() {
+  if (stakeTimer) clearInterval(stakeTimer);
+  stakeTimer = null;
+}
+
+function showStake(m: { ticket: TicketJson; sig: `0x${string}`; escrow: `0x${string}`; token: `0x${string}` }) {
+  stakeMsg = m;
+  failedMatch = null;
+  myPaid = false;
+  const stake = BigInt(m.ticket.stake);
+  $('wait').hidden = true;
+  $('result').hidden = true;
+  $('stake').hidden = false;
+  $('stake-title').textContent = `Race for ${fmtSqk(stake)} SQK`;
+  $('stake-sub').textContent = `You both put in ${fmtSqk(stake)} SQK. The winner gets ${fmtSqk(payout(stake))} SQK (5% fee); a draw gives both back. The race starts when both stakes are in.`;
+  $('stake-rival-name').textContent = rivalName || 'Rival';
+  $('stake-me').textContent = 'not yet';
+  $('stake-rival').textContent = 'not yet';
+  $('stake-error').textContent = '';
+  $('stake-step').textContent = 'Needs a little Sepolia ETH for the network fee.';
+  $('btn-stake-back').hidden = true;
+  const btn = $<HTMLButtonElement>('btn-deposit');
+  btn.hidden = false;
+  btn.disabled = false;
+  btn.textContent = `PUT IN ${fmtSqk(stake)} SQK`;
+  stakeTimerStop();
+  const tick = () => {
+    const left = Math.max(0, m.ticket.joinDeadline - Math.floor(Date.now() / 1000));
+    $('stake-timer').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    if (left === 0) btn.disabled = true;
+  };
+  tick();
+  stakeTimer = setInterval(tick, 500);
+}
+
+function paintStakeStatus(paid: [boolean, boolean]) {
+  const mine = paid[you];
+  const theirs = paid[you === 0 ? 1 : 0];
+  if (mine) myPaid = true;
+  $('stake-me').textContent = mine ? 'in ✓' : 'not yet';
+  $('stake-rival').textContent = theirs ? 'in ✓' : 'not yet';
+  if (mine) $<HTMLButtonElement>('btn-deposit').hidden = true;
+  if (mine && theirs) $('stake-step').textContent = 'Both stakes are in. Starting…';
+  else if (mine) $('stake-step').textContent = 'Your stake is in. Waiting for your rival…';
+}
+
+async function doDeposit() {
+  if (!stakeMsg) return;
+  const btn = $<HTMLButtonElement>('btn-deposit');
+  btn.disabled = true;
+  $('stake-error').textContent = '';
+  try {
+    const p = await walletProvider();
+    await depositStake(p, stakeMsg, (s) => ($('stake-step').textContent = s));
+    myPaid = true;
+    $('stake-me').textContent = 'in ✓';
+    btn.hidden = true;
+    $('stake-step').textContent = 'Your stake is in. Waiting for your rival…';
+    conn?.send({ type: 'paid' });
+  } catch (e) {
+    $('stake-error').textContent = e instanceof Error ? e.message : 'The deposit did not go through.';
+    btn.disabled = false;
+  }
+}
+
+function onStakeFailed(matchId: `0x${string}`, paid: [boolean, boolean]) {
+  stakeTimerStop();
+  const iPaid = paid[you] || myPaid;
+  $('stake').hidden = false;
+  $<HTMLButtonElement>('btn-deposit').hidden = true;
+  $('stake-timer').textContent = '';
+  $('stake-step').textContent = '';
+  $('stake-error').textContent = '';
+  $('stake-sub').textContent = iPaid
+    ? "Your rival didn't put in their stake in time, so there is no race. Take your SQK back below (it needs a small network fee)."
+    : 'Not both stakes went in on time, so there is no race. Nothing was taken from you.';
+  if (iPaid && stakeMsg) {
+    failedMatch = { matchId, escrow: stakeMsg.escrow, deadline: stakeMsg.ticket.joinDeadline };
+    $('btn-stake-back').hidden = false;
+  }
+}
+
+async function doTakeBack() {
+  if (!failedMatch) return;
+  const b = $<HTMLButtonElement>('btn-stake-back');
+  b.disabled = true;
+  $('stake-error').textContent = '';
+  try {
+    const p = await walletProvider();
+    $('stake-step').textContent = 'Confirm in your wallet…';
+    const hash = await takeBack(p, failedMatch.escrow, failedMatch.matchId);
+    $('stake-step').innerHTML = '';
+    const a = document.createElement('a');
+    a.href = txLink(hash);
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'Your SQK is back ✓ (view on Etherscan)';
+    $('stake-step').append(a);
+    b.hidden = true;
+  } catch (e) {
+    $('stake-error').textContent = e instanceof Error ? e.message : 'Failed.';
+    b.disabled = false;
+  }
+}
+
+function paintPayout() {
+  const box = $('res-payout');
+  if (!lastPayout) {
+    box.hidden = true;
+    return;
+  }
+  const stake = BigInt(lastPayout.stake);
+  const o = lastPayout.result.outcome;
+  const iWon = o === (you === 0 ? 1 : 2);
+  const btn = $<HTMLButtonElement>('btn-claim');
+  box.hidden = false;
+  btn.disabled = false;
+  $('pay-step').textContent = '';
+  if (o === 3) {
+    $('pay-text').textContent = `Draw: you each get your ${fmtSqk(stake)} SQK back.`;
+    btn.textContent = `TAKE BACK ${fmtSqk(stake)} SQK`;
+    btn.hidden = false;
+  } else if (iWon) {
+    $('pay-text').textContent = `You won ${fmtSqk(payout(stake))} SQK! Claim it from the contract (small network fee). You can also claim later from the home screen.`;
+    btn.textContent = `CLAIM ${fmtSqk(payout(stake))} SQK`;
+    btn.hidden = false;
+  } else {
+    $('pay-text').textContent = `Your rival takes the pot this time.`;
+    btn.hidden = true;
+  }
+}
+
+async function doClaim() {
+  if (!lastPayout) return;
+  const btn = $<HTMLButtonElement>('btn-claim');
+  btn.disabled = true;
+  try {
+    const p = await walletProvider();
+    $('pay-step').textContent = 'Confirm in your wallet…';
+    const hash = await claim(p, lastPayout.escrow, lastPayout.result, lastPayout.sig);
+    $('pay-step').textContent = '';
+    const a = document.createElement('a');
+    a.href = txLink(hash);
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'Paid out ✓ (view on Etherscan)';
+    $('pay-step').append(a);
+    btn.hidden = true;
+  } catch (e) {
+    $('pay-step').textContent = e instanceof Error ? e.message : 'The claim did not go through.';
+    btn.disabled = false;
+  }
+}
+
 async function boot() {
   const fill = $('loader-fill');
   const text = $('loader-text');
@@ -841,7 +1197,9 @@ async function boot() {
   document.body.classList.remove('loading');
   refreshBoard();
   refreshTotals();
+  refreshStakeConfig();
   setInterval(refreshLive, 20_000);
+  setInterval(refreshChallenges, 15_000);
   setInterval(refreshTotals, 120_000);
   // Invite links: /?r=code
   const invite = new URLSearchParams(location.search).get('r');

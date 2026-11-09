@@ -13,6 +13,12 @@ export interface Env {
   BOT_CV_MIN?: string;
   /** Sepolia JSON-RPC used to verify smart-contract wallet signatures. */
   SEPOLIA_RPC?: string;
+  /** SprintEscrow contract address on Sepolia. Staked races are off until this and REFEREE_KEY are set. */
+  ESCROW_ADDRESS?: string;
+  /** The server's signing key for staked tickets and results (0x + 64 hex). Secret: `wrangler secret put REFEREE_KEY`. */
+  REFEREE_KEY?: string;
+  /** Token the escrow holds. Defaults to $SQK on Sepolia. */
+  SQK_ADDRESS?: string;
   /** Dev only: lets browsers without a wallet play online as guests. Never set in production. */
   ALLOW_GUESTS?: string;
 }

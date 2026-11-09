@@ -29,6 +29,75 @@ export class Board extends DurableObject<Env> {
       key TEXT PRIMARY KEY, name TEXT NOT NULL, elo INTEGER NOT NULL DEFAULT 1000,
       wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, best_ms INTEGER, updated INTEGER NOT NULL)`);
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS nonces (n TEXT PRIMARY KEY, exp INTEGER NOT NULL)');
+    // Staked matches and their signed results, so a winner who closed the tab can still claim.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS stakes (
+      match_id TEXT PRIMARY KEY, a TEXT NOT NULL, b TEXT NOT NULL, stake TEXT NOT NULL, deadline INTEGER NOT NULL,
+      ticket TEXT NOT NULL, state TEXT NOT NULL, result TEXT, sig TEXT, created INTEGER NOT NULL)`);
+    // Open staked rooms anyone can join from the challenge board.
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS challenges (
+      code TEXT PRIMARY KEY, stake INTEGER NOT NULL, name TEXT NOT NULL, addr TEXT NOT NULL, created INTEGER NOT NULL)`);
+  }
+
+  // ---------------------------------------------------------------- staked matches
+
+  async stakeOpened(r: { matchId: string; a: string; b: string; stake: string; deadline: number; ticket: string }) {
+    this.ctx.storage.sql.exec(
+      'INSERT OR REPLACE INTO stakes (match_id, a, b, stake, deadline, ticket, state, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      r.matchId, r.a.toLowerCase(), r.b.toLowerCase(), r.stake, r.deadline, r.ticket, 'deposit', Date.now(),
+    );
+  }
+
+  async stakeState(matchId: string, state: 'racing' | 'failed') {
+    this.ctx.storage.sql.exec('UPDATE stakes SET state = ? WHERE match_id = ?', state, matchId);
+  }
+
+  async stakeResult(matchId: string, result: string, sig: string) {
+    this.ctx.storage.sql.exec("UPDATE stakes SET state = 'result', result = ?, sig = ? WHERE match_id = ?", result, sig, matchId);
+  }
+
+  /** A wallet's recent staked matches (newest first), with the signed result when there is one. */
+  async stakesFor(addr: string) {
+    const a = addr.toLowerCase();
+    return this.ctx.storage.sql
+      .exec<{ match_id: string; a: string; b: string; stake: string; deadline: number; ticket: string; state: string; result: string | null; sig: string | null; created: number }>(
+        'SELECT * FROM stakes WHERE a = ? OR b = ? ORDER BY created DESC LIMIT 20',
+        a, a,
+      )
+      .toArray()
+      .map((r) => ({
+        matchId: r.match_id,
+        a: r.a,
+        b: r.b,
+        stake: r.stake,
+        deadline: r.deadline,
+        ticket: JSON.parse(r.ticket),
+        state: r.state,
+        result: r.result ? JSON.parse(r.result) : null,
+        sig: r.sig,
+        created: r.created,
+      }));
+  }
+
+  // ---------------------------------------------------------------- challenge board
+
+  async openChallenge(c: { code: string; stake: number; name: string; addr: string }) {
+    this.ctx.storage.sql.exec(
+      'INSERT OR REPLACE INTO challenges (code, stake, name, addr, created) VALUES (?, ?, ?, ?, ?)',
+      c.code, c.stake, c.name, c.addr, Date.now(),
+    );
+  }
+
+  async closeChallenge(code: string) {
+    this.ctx.storage.sql.exec('DELETE FROM challenges WHERE code = ?', code);
+  }
+
+  async listChallenges() {
+    const sql = this.ctx.storage.sql;
+    sql.exec('DELETE FROM challenges WHERE created < ?', Date.now() - 15 * 60_000);
+    return sql
+      .exec<{ code: string; stake: number; name: string; addr: string; created: number }>('SELECT * FROM challenges ORDER BY created DESC LIMIT 30')
+      .toArray()
+      .map((r) => ({ code: r.code, stake: r.stake, name: r.name, wallet: `${r.addr.slice(0, 6)}…${r.addr.slice(-4)}`, age: Date.now() - r.created }));
   }
 
   private get(key: string, name: string) {

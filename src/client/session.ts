@@ -1,7 +1,7 @@
 import { generateCourse, sortCourse, type Obs } from '../shared/course';
-import { TICK_HZ } from '../shared/constants';
-import { COURSE_LEN, RULES, TICK_CAP } from './variant';
-import { CLASSIC, tired, cloneState, initState, sameState, step, type Key, type PState } from '../shared/sim';
+import { MAX_TICKS, TICK_HZ } from '../shared/constants';
+import { RULES, TICK_CAP } from './variant';
+import { GAME_RULES, tired, cloneState, initState, sameState, step, type Key, type PState } from '../shared/sim';
 import { Bot } from '../shared/bot';
 import { randomHex } from '../shared/hash';
 import type { Conn } from './net';
@@ -10,7 +10,7 @@ import type { LiveInfo } from '../shared/protocol';
 export type Mode = 'online' | 'practice' | 'attract';
 
 const HISTORY = 420;
-const MAX_ONLINE = 60 * 180;
+const MAX_ONLINE = MAX_TICKS;
 
 /**
  * A race as seen by this browser. "me" is simulated locally from my own key presses (no lag);
@@ -33,8 +33,8 @@ export class Session {
   private bots: [Bot | null, Bot | null] = [null, null];
   private oppSnap: { st: PState; at: number } | null = null;
   resyncs = 0;
-  /** Online races always use the server's (classic) rules. */
-  rules = CLASSIC;
+  /** Online races always use the server's rules. */
+  rules = GAME_RULES;
 
   private constructor(readonly mode: Mode, t0: number, clock: () => number, readonly conn: Conn | null = null) {
     this.t0 = t0;
@@ -44,7 +44,7 @@ export class Session {
   static practice(mode: 'practice' | 'attract', skill = 0.7, live: LiveInfo | null = null): Session {
     const s = new Session(mode, performance.now() + (mode === 'attract' ? 0 : 3500), () => performance.now());
     const seed = randomHex(32);
-    s.course = generateCourse(seed + seed, !!live?.active, COURSE_LEN);
+    s.course = generateCourse(seed + seed, !!live?.active);
     s.rules = RULES;
     s.live = live;
     s.names = mode === 'attract' ? ['Pip', 'Nugget'] : ['You', 'Biscuit (bot)'];

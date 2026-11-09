@@ -11,6 +11,8 @@ import { HEX32, randomHex, sha256Hex } from '../src/shared/hash';
 import { cleanName, type ClientMsg, type LiveInfo, type ServerMsg } from '../src/shared/protocol';
 import { tiredAt, winnerAtCap, initState, KEYS, step, type Key, type PState } from '../src/shared/sim';
 import { humanReport } from '../src/shared/stats';
+import { STATUS, type ResultJson, type TicketJson } from '../src/shared/escrow';
+import { makeTicket, readMatch, signResult, stakeConfig, type StakeConfig } from './stake';
 
 interface Player {
   /** null while the player is disconnected mid-race; they can come back until it ends. */
@@ -33,7 +35,8 @@ interface Player {
   rateCount: number;
 }
 
-type Phase = 'lobby' | 'countdown' | 'running' | 'ended';
+/** 'deposit': a staked room waiting for both stakes to land in the escrow before the race. */
+type Phase = 'lobby' | 'deposit' | 'countdown' | 'running' | 'ended';
 
 /**
  * One match room. The server is the referee: it re-runs both players' races from their raw key
@@ -59,6 +62,28 @@ export class Room extends DurableObject<Env> {
 
   private sentOrder: Obs[] = [];
   private lastEnd: ServerMsg | null = null;
+
+  // ---- races for SQK
+  /** Whole SQK each player puts in; 0 = a free race. Fixed by whoever opens the room. */
+  private stake = 0;
+  /** Listed on the public challenge board while waiting for a rival. */
+  private listed = false;
+  private wantsListing = false;
+  private deposit: { ticket: TicketJson; sig: `0x${string}`; cfg: StakeConfig; poll: ReturnType<typeof setInterval> | null; failAt: number } | null = null;
+  /** The escrow match this race is for, once both stakes are in. */
+  private activeMatch: { ticket: TicketJson; cfg: StakeConfig } | null = null;
+  private checking = false;
+  private lastPayout: ServerMsg | null = null;
+
+  private board() {
+    return this.env.BOARD.get(this.env.BOARD.idFromName('global')) as DurableObjectStub<Board>;
+  }
+
+  private stakeMsg(): ServerMsg | null {
+    if (!this.deposit) return null;
+    const d = this.deposit;
+    return { type: 'stake', ticket: d.ticket, sig: d.sig, escrow: d.cfg.escrow, token: d.cfg.token };
+  }
 
   async fetch(req: Request): Promise<Response> {
     if (!this.commit) this.commit = await sha256Hex(this.serverSeed);
@@ -91,15 +116,35 @@ export class Room extends DurableObject<Env> {
       p.away = false;
       this.listen(mine as 0 | 1, ws);
       const live = this.phase === 'running' || this.phase === 'countdown';
-      this.send(ws, { type: 'welcome', you: mine as 0 | 1, commit: this.commit, code: this.code, resumed: live });
+      this.send(ws, { type: 'welcome', you: mine as 0 | 1, commit: this.commit, code: this.code, resumed: live, stake: this.stake });
       if (live) {
         const [a, b] = this.players;
         this.send(ws, { type: 'start', t0: this.t0, names: [a?.name ?? '?', b?.name ?? '?'], live: this.live, commit: this.startCommit });
         if (this.sentOrder.length) this.send(ws, { type: 'course', obs: this.sentOrder });
         if (a && b) this.send(ws, { type: 'snap', p: [a.st, b.st] });
         if (wasAway) this.sendOther(mine as 0 | 1, { type: 'peer', away: false });
-      } else if (this.phase === 'ended' && this.lastEnd) this.send(ws, this.lastEnd);
+      } else if (this.phase === 'deposit') {
+        const sm = this.stakeMsg();
+        if (sm) this.send(ws, sm);
+        if (wasAway) this.sendOther(mine as 0 | 1, { type: 'peer', away: false });
+      } else if (this.phase === 'ended' && this.lastEnd) {
+        this.send(ws, this.lastEnd);
+        if (this.lastPayout) this.send(ws, this.lastPayout);
+      }
       this.roster();
+      return reply();
+    }
+
+    // The first player in an empty room sets its stake (the Worker already checked the amount).
+    const url = new URL(req.url);
+    if (!this.players[0] && !this.players[1] && this.phase === 'lobby') {
+      const s = Number(url.searchParams.get('stake') ?? 0);
+      this.stake = Number.isInteger(s) && s > 0 ? s : 0;
+      this.wantsListing = this.stake > 0 && url.searchParams.get('pub') === '1';
+    }
+    if (this.stake > 0 && (!id.startsWith('0x') || !stakeConfig(this.env))) {
+      this.send(ws, { type: 'error', msg: !id.startsWith('0x') ? 'Races for SQK need a signed-in wallet.' : 'Races for SQK are not switched on yet.' });
+      ws.close(1008, 'stake');
       return reply();
     }
 
@@ -116,8 +161,12 @@ export class Room extends DurableObject<Env> {
     };
     this.players[slot] = p;
     this.listen(slot as 0 | 1, ws);
-    this.send(ws, { type: 'welcome', you: slot as 0 | 1, commit: this.commit, code: this.code });
+    this.send(ws, { type: 'welcome', you: slot as 0 | 1, commit: this.commit, code: this.code, stake: this.stake });
     this.roster();
+    if (this.players[0] && this.players[1] && this.listed) {
+      this.listed = false;
+      this.board().closeChallenge(this.code).catch(() => {});
+    }
     return reply();
   }
 
@@ -183,6 +232,10 @@ export class Room extends DurableObject<Env> {
         p.seed = m.seed;
         p.webdriver = m.wd === true;
         this.roster();
+        if (this.wantsListing && !this.listed && !(this.players[0] && this.players[1])) {
+          this.listed = true;
+          this.board().openChallenge({ code: this.code, stake: this.stake, name: p.name, addr: p.key }).catch(() => {});
+        }
         this.maybeStart();
         return;
       case 'rematch':
@@ -197,6 +250,10 @@ export class Room extends DurableObject<Env> {
         return;
       case 'in':
         this.onInputs(p, m.a);
+        return;
+      case 'paid':
+        // A player says their deposit went through: look at the contract now.
+        this.checkDeposits().catch(() => {});
         return;
     }
   }
@@ -238,8 +295,70 @@ export class Room extends DurableObject<Env> {
     if (this.phase !== 'lobby') return;
     const [a, b] = this.players;
     if (!a?.seed || !b?.seed) return;
+    if (this.stake > 0) {
+      this.phase = 'deposit';
+      this.beginDeposit(a, b).catch(() => this.failDeposit(null));
+      return;
+    }
     this.phase = 'countdown';
     this.start(a, b).catch(() => this.reset());
+  }
+
+  /** Staked room: sign a ticket for both wallets and wait for both stakes to land on-chain. */
+  private async beginDeposit(a: Player, b: Player) {
+    const cfg = stakeConfig(this.env);
+    if (!cfg) {
+      this.broadcast({ type: 'error', msg: 'Races for SQK are not switched on yet.' });
+      this.failDeposit(null);
+      return;
+    }
+    const { ticket, sig } = await makeTicket(this.env, cfg, a.key, b.key, this.stake);
+    // Give up a little after the contract's own deadline, so late deposits can't slip in after we did.
+    this.deposit = { ticket, sig, cfg, poll: null, failAt: (ticket.joinDeadline + 20) * 1000 };
+    this.lastPayout = null;
+    await this.board().stakeOpened({ matchId: ticket.matchId, a: a.key, b: b.key, stake: ticket.stake, deadline: ticket.joinDeadline, ticket: JSON.stringify(ticket) });
+    const sm = this.stakeMsg();
+    if (sm) this.broadcast(sm);
+    this.deposit.poll = setInterval(() => this.checkDeposits().catch(() => {}), 4000);
+  }
+
+  private async checkDeposits() {
+    const d = this.deposit;
+    if (!d || this.phase !== 'deposit' || this.checking) return;
+    this.checking = true;
+    try {
+      const m = await readMatch(this.env, d.cfg, d.ticket.matchId);
+      if (this.deposit !== d || this.phase !== 'deposit') return;
+      this.broadcast({ type: 'stake_status', paid: [m.paidA, m.paidB] });
+      if (m.status === STATUS.Active) {
+        // Both stakes are locked in the contract: race.
+        if (d.poll) clearInterval(d.poll);
+        this.deposit = null;
+        this.activeMatch = { ticket: d.ticket, cfg: d.cfg };
+        await this.board().stakeState(d.ticket.matchId, 'racing');
+        const [a, b] = this.players;
+        if (!a || !b) return;
+        this.phase = 'countdown';
+        await this.start(a, b);
+        return;
+      }
+      if (Date.now() > d.failAt) this.failDeposit(m);
+    } finally {
+      this.checking = false;
+    }
+  }
+
+  /** Not both paid in time: no race. Whoever paid takes it back with cancel() on the contract. */
+  private failDeposit(m: { paidA: boolean; paidB: boolean } | null) {
+    const d = this.deposit;
+    if (d?.poll) clearInterval(d.poll);
+    this.deposit = null;
+    this.phase = 'lobby';
+    for (const p of this.players) if (p) p.seed = null;
+    if (d) {
+      this.broadcast({ type: 'stake_failed', matchId: d.ticket.matchId, paid: [m?.paidA ?? false, m?.paidB ?? false] });
+      this.board().stakeState(d.ticket.matchId, 'failed').catch(() => {});
+    }
   }
 
   private async start(a: Player, b: Player) {
@@ -270,6 +389,8 @@ export class Room extends DurableObject<Env> {
   private reset() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.deposit?.poll) clearInterval(this.deposit.poll);
+    this.deposit = null;
     this.phase = 'lobby';
   }
 
@@ -381,6 +502,25 @@ export class Room extends DurableObject<Env> {
     };
     this.lastEnd = endMsg;
     this.broadcast(endMsg);
+
+    // A race for SQK: sign the result for the contract. 1 = A wins, 2 = B wins, 3 = draw.
+    const staked = this.activeMatch;
+    this.activeMatch = null;
+    if (staked) {
+      const res: ResultJson = {
+        matchId: staked.ticket.matchId,
+        outcome: winner === 0 ? 1 : winner === 1 ? 2 : 3,
+        replayHash: `0x${inputHash}`,
+      };
+      try {
+        const sig = await signResult(this.env, staked.cfg, res);
+        this.lastPayout = { type: 'payout', result: res, sig, escrow: staked.cfg.escrow, stake: staked.ticket.stake };
+        this.broadcast(this.lastPayout);
+        await this.board().stakeResult(res.matchId, JSON.stringify(res), sig);
+      } catch {
+        // No signature means nobody can settle; the contract refunds both after its window.
+      }
+    }
     // Players who never came back give up their seat so the room can be reused.
     for (let i = 0; i < 2; i++) if (this.players[i]?.away) this.players[i] = null;
     if (!this.players[0] || !this.players[1]) {
@@ -404,8 +544,8 @@ export class Room extends DurableObject<Env> {
   private onLeave(slot: 0 | 1, ws: WebSocket) {
     const p = this.players[slot];
     if (!p || p.ws !== ws) return;
-    if (this.phase === 'running' || this.phase === 'countdown') {
-      // Mid-race: keep the seat. The wheel stops while you're gone; come back before the race ends.
+    if (this.phase === 'running' || this.phase === 'countdown' || this.phase === 'deposit') {
+      // Mid-race (or while stakes are going in): keep the seat. The wheel stops while you're gone; come back before the race ends.
       p.ws = null;
       p.away = true;
       p.awaySince = Date.now();
@@ -414,6 +554,10 @@ export class Room extends DurableObject<Env> {
     }
     this.players[slot] = null;
     if (this.phase === 'ended') this.phase = 'lobby';
+    if (this.listed && !this.players[0] && !this.players[1]) {
+      this.listed = false;
+      this.board().closeChallenge(this.code).catch(() => {});
+    }
     for (const x of this.players) if (x) x.seed = null;
     this.broadcast({ type: 'left' });
     this.roster();

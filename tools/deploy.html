@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Deploy escrow</title>
+    <style>
+      :root { color-scheme: light dark; --line: #8884; }
+      body { font: 15px/1.5 ui-monospace, Menlo, monospace; max-width: 720px; margin: 40px auto; padding: 0 16px; background: Canvas; color: CanvasText; }
+      h1 { font-size: 20px; }
+      .box { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+      .row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+      code { word-break: break-all; }
+      button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; }
+      button.primary { background: #23202e; color: #fff; }
+      .ok { color: #2f9e5a; } .bad { color: #e5484d; }
+      #log p { margin: 4px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Hamstride · deploy the escrow contract</h1>
+    <p>This sends one transaction from <b>your</b> wallet on Sepolia that creates the contract. You will own it. Nothing else is sent anywhere.</p>
+    <div class="box">
+      <div class="row"><span>Network</span><b>Sepolia (11155111)</b></div>
+      <div class="row"><span>Token ($SQK)</span><code id="token"></code></div>
+      <div class="row"><span>Server signing address</span><code id="referee"></code></div>
+      <div class="row"><span>Owner (you)</span><code id="owner">connect first</code></div>
+      <div class="row"><span>Fee</span><b>5% of the pot on wins, fixed</b></div>
+    </div>
+    <p><button id="connect">1. CONNECT WALLET</button> <button class="primary" id="deploy" disabled>2. DEPLOY</button></p>
+    <div id="log"></div>
+    <script type="module" src="./deploy.ts"></script>
+  </body>
+</html>

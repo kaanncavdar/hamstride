@@ -57,8 +57,15 @@ export async function ensureSepolia(p: Eip1193) {
   try {
     await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: SEPOLIA.chainId }] });
   } catch (e) {
-    if (errCode(e) !== 4902) throw e;
-    await p.request({ method: 'wallet_addEthereumChain', params: [SEPOLIA] });
+    // MetaMask says 4902; Rabby says -32603 "Unrecognized chain ID" when its test networks are off.
+    const msg = String((e as { message?: string })?.message ?? '');
+    if (errCode(e) !== 4902 && !/unrecognized chain/i.test(msg)) throw e;
+    try {
+      await p.request({ method: 'wallet_addEthereumChain', params: [SEPOLIA] });
+    } catch (e2) {
+      if (errCode(e2) === 4001) throw e2;
+      throw new Error('Your wallet does not have the Sepolia test network turned on. Turn on test networks in its settings (in Rabby: Settings → Enable Testnets), then try again.');
+    }
   }
   const after = String(await p.request({ method: 'eth_chainId' })).toLowerCase();
   if (after !== SEPOLIA.chainId) throw new Error('Please switch your wallet to the Sepolia test network.');
@@ -93,7 +100,7 @@ export async function signIn(w: WalletInfo): Promise<string> {
   const message = createSiweMessage({
     domain: location.host,
     address,
-    statement: 'Sign in to Squeek Sprint. This only proves you own this wallet: no transaction, no gas, no approvals.',
+    statement: 'Sign in to Hamstride. This only proves you own this wallet: no transaction, no gas, no approvals.',
     uri: location.origin,
     version: '1',
     chainId,

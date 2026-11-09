@@ -2,7 +2,10 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './env';
 import { randomHex } from '../src/shared/hash';
 
-/** Quick match: pairs the first two players in the queue and sends both to a fresh room. */
+/**
+ * Quick match: pairs the first two players in the queue and sends both to a fresh room. There is
+ * one Lobby per table (free, or a stake tier); the Worker picks it from the `stake` parameter.
+ */
 export class Lobby extends DurableObject<Env> {
   private waiting: WebSocket[] = [];
   private ids = new WeakMap<WebSocket, string>();
@@ -12,6 +15,7 @@ export class Lobby extends DurableObject<Env> {
     const ws = pair[1];
     ws.accept();
     const id = req.headers.get('X-Player-Id') ?? '';
+    const stake = Number(new URL(req.url).searchParams.get('stake')) || 0;
     this.ids.set(ws, id);
     // Never pair a wallet with itself (two tabs): the newer tab replaces the older one in the queue.
     for (const w of this.waiting) if (this.ids.get(w) === id) w.close(4000, 'replaced');
@@ -19,8 +23,9 @@ export class Lobby extends DurableObject<Env> {
     const other = this.waiting.shift();
     if (other) {
       const code = randomHex(5);
+      // The two players join `code` with this stake; a staked room asks both to deposit first.
       for (const w of [other, ws]) {
-        w.send(JSON.stringify({ type: 'matched', code }));
+        w.send(JSON.stringify({ type: 'matched', code, stake }));
         w.close(1000, 'matched');
       }
     } else {

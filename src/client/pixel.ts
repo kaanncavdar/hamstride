@@ -200,6 +200,10 @@ const GLYPHS: Record<string, string[]> = {
   I: ['.###.', '..#..', '..#..', '..#..', '..#..', '..#..', '.###.'],
   N: ['#...#', '##..#', '#.#.#', '#..##', '#...#', '#...#', '#...#'],
   T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  H: ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+  A: ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+  M: ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
+  D: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '####.'],
   ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
 };
 
@@ -224,6 +228,9 @@ export function dotText(text: string, top: string, bottom: string): string {
 
 export function hydrateDotText(root: ParentNode = document) {
   root.querySelectorAll<HTMLElement>('[data-dots]').forEach((el) => {
-    el.innerHTML = dotText(el.dataset.dots ?? '', el.dataset.top ?? '#ffe3a3', el.dataset.bottom ?? '#d9772b');
+    const text = el.dataset.dots ?? '';
+    el.innerHTML = dotText(text, el.dataset.top ?? '#ffe3a3', el.dataset.bottom ?? '#d9772b');
+    // Words sit side by side at the same dot size: each takes width in proportion to its letters.
+    el.style.setProperty('--dw', String(text.length * 6 - 1));
   });
 }
