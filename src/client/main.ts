@@ -17,7 +17,6 @@ import { randomHex, sha256Hex } from '../shared/hash';
 import { tired, tiredAt, winnerAtCap, type Key, type PState } from '../shared/sim';
 import { TICK_HZ } from '../shared/constants';
 import { Bot } from '../shared/bot';
-import { humanReport } from '../shared/stats';
 import { ROOM_CODE, type EndInfo, type LiveInfo, type ServerMsg } from '../shared/protocol';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -593,12 +592,6 @@ function fillGrid(me: PState, op: PState, names: [string, string]) {
   });
 }
 
-const humanLine = (h: { verdict: string; reactMs: number; cv: number }) =>
-  h.verdict === 'few'
-    ? 'Reactions: not enough to judge'
-    : h.verdict === 'human'
-      ? `Reactions look human (${h.reactMs.toFixed(0)} ms on average, varying ${(h.cv * 100).toFixed(0)}%)`
-      : 'Reactions look scripted, so this race is not ranked';
 
 function check(ok: boolean, text: string, detail = '') {
   const d = document.createElement('div');
@@ -659,8 +652,8 @@ async function showOnlineResult(m: { type: 'end' } & EndInfo) {
     return !!r && r.d === o.d && r.kind === o.kind && r.lane === o.lane;
   });
   check(okSeen && (await courseHash(regen)) === m.courseHash, 'Every obstacle you saw was built from those seeds', m.courseHash.slice(0, 16) + '…');
-  const h = m.human[meIdx];
-  check(h.verdict !== 'steady', humanLine(h));
+  // The reaction check still runs on the server; the player only hears about it when it flags them.
+  if (m.human[meIdx].verdict === 'steady') check(false, 'Reactions look scripted, so this race is not ranked');
   check(true, 'Replay fingerprint', m.inputHash.slice(0, 24) + '…');
 }
 
@@ -680,8 +673,6 @@ function showPracticeResult() {
     : `${how} Practice race, nothing is recorded.`;
   fillGrid(me, op, session.names);
   $('res-checks').textContent = '';
-  const h = humanReport(me);
-  check(h.verdict !== 'steady', humanLine(h));
   $('res-wait').textContent = '';
   $('btn-rematch').textContent = 'AGAIN';
   $('result').hidden = false;
