@@ -4,7 +4,7 @@
 
 A 1v1 hamster runner in the browser, built for [Squeekchain](https://squeekchain.com), the blockchain powered by a real hamster. It is an independent community project, not made by the Squeekchain team.
 
-**Play:** [hamstride.xyz](https://hamstride.xyz) · Practice needs nothing. Online races need a wallet sign-in on the Sepolia test network (a free signature, no transaction).
+> **The project is closed and the site is offline.** Hamstride only ever ran on the Sepolia test network with test tokens that have no value; it never ran on Ethereum mainnet or with real money. The code stays here for reference.
 
 Both players run on one giant six-lane hamster wheel (modelled on Squeektoshi's WHEELY9000), seen from behind. The screen splits down the middle of the wheel: you run in the left three lanes, your rival in the right three, on the same course. Use **← →** to change lanes, **↑** to jump cork logs and **↓** to slide under wooden bridges; on a phone, swipe. Hideouts and rolling chew balls are too tall: go round them. You have three ⚡ energy bolts and every bump costs one; with none left the hamster sits down to rest. A **mini wheel** makes you faster and takes one bump for you; a **hamster ball** rolls over logs and under bridges and takes one bump. Snacks (seeds, broccoli, courgette, mealworms) win a bolt back.
 

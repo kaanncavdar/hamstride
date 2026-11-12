@@ -18,12 +18,9 @@
   },
   // SQLite-backed Durable Objects are available on the Workers free plan.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "Lobby", "Board"] }],
-  // The game is served on hamstride.xyz. Cloudflare creates the DNS records on deploy.
-  "routes": [
-    { "pattern": "hamstride.xyz", "custom_domain": true },
-    { "pattern": "www.hamstride.xyz", "custom_domain": true }
-  ],
-  // Only the real domain: no second public copy on workers.dev.
+  // The project is closed: hamstride.xyz is no longer attached to the worker. To serve it again, add
+  // { "pattern": "hamstride.xyz", "custom_domain": true } (and www.hamstride.xyz) under "routes" and deploy.
+  // No workers.dev copy either, so the worker is not reachable from the internet.
   "workers_dev": false,
   // Local dev: keep requests on localhost instead of rewriting them to the production subdomain.
   "dev": { "host": "localhost:5173" },
